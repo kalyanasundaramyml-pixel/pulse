@@ -115,7 +115,7 @@ machine running `docker compose build` sits behind such a proxy:
    `certs/` folders are gitignored — don't rely on them for anything checked
    into version control.
 
-Employees' browsers reaching the app are generally unaffected by a
+Users' browsers reaching the app are generally unaffected by a
 TLS-inspecting proxy either way: this app is served over plain HTTP inside
 the network (see `COOKIE_SECURE` below), and proxy SSL inspection only
 applies to HTTPS traffic. If you later put TLS in front of this app with
