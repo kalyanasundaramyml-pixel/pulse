@@ -1,6 +1,6 @@
 # Pulse — User Manual
 
-Pulse is the internal tool for running feedback surveys and recurring 1:1
+Pulse is the tool for running feedback surveys and recurring 1:1
 check-ins. This manual covers everything you can do in the app, organized by
 role: **User** (everyone), **Leader**, and **Admin**. Leaders and Admins
 should also read the User section first — they see everything a User sees,
@@ -163,7 +163,7 @@ Even after publishing, you're not stuck:
 
 ### Recipients and Groups
 
-- On a survey's **Manage recipients** page, search the employee directory
+- On a survey's **Manage recipients** page, search the directory
   by name or email and add people one at a time, or pick a **Group** from
   the dropdown to add everyone in it at once.
 - Removing someone who has already responded is blocked — their response
@@ -309,7 +309,7 @@ Because Admin includes Leader permissions everywhere, an Admin can also
 create and manage surveys, groups, and 1:1 templates exactly as described
 in the [For Leaders](#for-leaders) section above. An Admin's **Surveys** and
 **One-on-Ones** tabs show the same "Assigned to me / Created by me /
-Templates" split as a Leader's — there's no separate "every survey in the
-company" view, so oversight of another leader's surveys happens through
+Templates" split as a Leader's — there's no separate "every survey, org-wide"
+view, so oversight of another leader's surveys happens through
 that leader directly or through your database backups/audit log, not the
 UI.

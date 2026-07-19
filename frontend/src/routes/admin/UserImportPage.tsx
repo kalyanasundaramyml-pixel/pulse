@@ -86,7 +86,7 @@ export function UserImportPage() {
           </p>
           <p>
             There is no email relay configured, so each new user got a random temporary password. Download it now
-            and distribute it to the employee &mdash; it will not be shown again.
+            and distribute it to the person &mdash; it will not be shown again.
           </p>
           <button onClick={() => downloadCsv(result)}>Download temp passwords CSV</button>
           {result.errors.length > 0 && (

@@ -13,8 +13,7 @@ but this file is the one that explains **why**, which the code alone won't.
 
 ## 1. Product summary
 
-Pulse is an internal, firewall-hosted web app (~500 employees) for two
-related but distinct things:
+Pulse is a self-hosted web app for two related but distinct things:
 
 1. **Feedback surveys** — one-off or periodic campaigns sent to a
    hand-picked list of recipients, either **anonymous** (structurally

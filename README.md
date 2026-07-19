@@ -1,6 +1,6 @@
 # Pulse
 
-Internal, firewall-hosted web app for creating anonymous or attributed feedback
+Self-hosted web app for creating anonymous or attributed feedback
 surveys and recurring 1:1 check-ins, targeting a hand-picked list of
 recipients, and viewing results (including 1:1 trends over time) on a leader
 dashboard. See [the implementation plan](.) for the full design rationale

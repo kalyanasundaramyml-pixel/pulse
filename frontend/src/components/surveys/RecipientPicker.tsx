@@ -88,7 +88,7 @@ export function RecipientPicker({
       )}
       {groupError && <p className="form-error">{groupError}</p>}
       <input
-        placeholder="Search employees by name or email"
+        placeholder="Search people by name or email"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
