@@ -78,35 +78,36 @@ generates a random temp password per user and returns them once as a
 downloadable CSV for the Admin to distribute through your normal internal
 channel; each user is forced to set their own password on first login.
 
-## Building behind Zscaler (or any TLS-inspecting proxy)
+## Building behind a TLS-inspecting corporate proxy
 
-Zscaler intercepts and re-signs HTTPS traffic with its own root CA. This only
-matters at **build time** — once the images are built, the running containers
-make zero outbound internet calls (no SMTP, no CDN, no third-party APIs), so
-Zscaler has nothing to intercept while the app is actually running.
+Some corporate networks intercept and re-sign HTTPS traffic with their own
+root CA. This only matters at **build time** — once the images are built,
+the running containers make zero outbound internet calls (no SMTP, no CDN,
+no third-party APIs), so a TLS-inspecting proxy has nothing to intercept
+while the app is actually running.
 
-There are two independent things that need Zscaler's root CA trusted if the
-machine running `docker compose build` sits behind it:
+There are two independent things that need your org's root CA trusted if the
+machine running `docker compose build` sits behind such a proxy:
 
 1. **Docker Desktop pulling the base images** (`node:20-alpine`,
    `postgres:16-alpine`, `nginx:1.27-alpine`) from Docker Hub. This happens
    before any `Dockerfile` instruction runs, so it can't be fixed from inside
    this repo — it's a Docker Desktop / OS-level trust issue. If
    `docker compose build` fails immediately with a certificate error while
-   pulling an image, get your org's Zscaler root CA (IT can provide it, or
-   export it yourself on Windows via `certmgr.msc` → *Trusted Root
-   Certification Authorities* → find *Zscaler* → *Export* as Base-64 X.509
-   `.crt`) and import it into Docker Desktop's trust store — on Windows with
-   the WSL2 backend that generally means adding the cert to the WSL
-   distro Docker Desktop uses (`update-ca-certificates` inside it) or
-   configuring it under Docker Desktop → *Settings* → *Docker Engine* /
-   *Resources* → *Proxies*, per Docker's docs for corporate proxies. This step
-   depends on your specific Docker Desktop version and IT setup, so if it
-   doesn't pull cleanly, check with IT for the sanctioned way to trust
-   Zscaler in Docker Desktop.
+   pulling an image, get your org's root CA (IT can provide it, or export it
+   yourself on Windows via `certmgr.msc` → *Trusted Root Certification
+   Authorities* → find your proxy's CA → *Export* as Base-64 X.509 `.crt`)
+   and import it into Docker Desktop's trust store — on Windows with the
+   WSL2 backend that generally means adding the cert to the WSL distro
+   Docker Desktop uses (`update-ca-certificates` inside it) or configuring
+   it under Docker Desktop → *Settings* → *Docker Engine* / *Resources* →
+   *Proxies*, per Docker's docs for corporate proxies. This step depends on
+   your specific Docker Desktop version and IT setup, so if it doesn't pull
+   cleanly, check with IT for the sanctioned way to trust it in Docker
+   Desktop.
 
 2. **`npm install` inside the build** (and any `apk` calls). This one *is*
-   handled by this repo: drop your org's Zscaler root CA as a `.crt` file into
+   handled by this repo: drop your org's root CA as a `.crt` file into
    `backend/certs/` **and** `frontend/certs/` (same file, both places) before
    building. Both Dockerfiles trust anything in that directory automatically
    via `update-ca-certificates` + `NODE_EXTRA_CA_CERTS`; it's a silent no-op if
@@ -114,12 +115,12 @@ machine running `docker compose build` sits behind it:
    `certs/` folders are gitignored — don't rely on them for anything checked
    into version control.
 
-Employees' browsers reaching the app are generally unaffected by Zscaler
-either way: this app is served over plain HTTP inside the network (see
-`COOKIE_SECURE` below), and Zscaler's SSL inspection only applies to HTTPS
-traffic. If you later put TLS in front of this app with your own internal CA,
-that's a separate, unrelated certificate-trust step for browsers — nothing to
-do with Zscaler specifically.
+Employees' browsers reaching the app are generally unaffected by a
+TLS-inspecting proxy either way: this app is served over plain HTTP inside
+the network (see `COOKIE_SECURE` below), and proxy SSL inspection only
+applies to HTTPS traffic. If you later put TLS in front of this app with
+your own internal CA, that's a separate, unrelated certificate-trust step
+for browsers — nothing to do with the build-time proxy.
 
 ## Backups
 

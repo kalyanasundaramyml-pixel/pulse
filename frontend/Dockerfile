@@ -1,9 +1,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# Trust an optional corporate root CA (e.g. Zscaler) so npm can fetch over
-# HTTPS when built on a machine behind a TLS-inspecting proxy. Drop your org's
-# CA cert(s) as .crt files into ./certs before building; no-op if empty.
+# Trust an optional corporate root CA so npm can fetch over HTTPS when built
+# on a machine behind a TLS-inspecting proxy. Drop your org's CA cert(s) as
+# .crt files into ./certs before building; no-op if empty.
 RUN apk add --no-cache ca-certificates
 COPY certs/ /usr/local/share/ca-certificates/corporate/
 RUN update-ca-certificates

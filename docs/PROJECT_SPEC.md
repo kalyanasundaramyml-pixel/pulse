@@ -28,8 +28,7 @@ related but distinct things:
 No external dependencies at runtime: no SMTP relay, no CDN, no third-party
 APIs. Accounts are local (email + password), created by an Admin — there is
 no self-registration and no "forgot password" self-service flow. The app
-must be buildable and runnable behind a corporate TLS-inspecting proxy
-(Zscaler).
+must be buildable and runnable behind a corporate TLS-inspecting proxy.
 
 ## 2. Roles & permission model
 
@@ -337,17 +336,17 @@ Both Survey and 1:1 templates support the same model:
 
 ## 7. Non-functional requirements
 
-- **Enterprise/Zscaler build support**: any place the build process does
-  `npm install` or `apk add` needs to trust the org's TLS-inspecting proxy
-  root CA. Provide a gitignored `certs/` directory in both `backend/` and
-  `frontend/`; both Dockerfiles should `apk add --no-cache ca-certificates
-  openssl` (⚠️ `node:20-alpine` does **not** ship `ca-certificates` by
-  default — this is a real, easy-to-hit build failure, not a
-  hypothetical), then `update-ca-certificates` + set `NODE_EXTRA_CA_CERTS`
-  if anything was dropped in `certs/`. Silent no-op if the directory is
-  empty, so it's always safe to leave wired up. Once built, the running
-  containers make zero outbound internet calls, so Zscaler only matters at
-  build time, not runtime.
+- **Enterprise/TLS-inspecting-proxy build support**: any place the build
+  process does `npm install` or `apk add` needs to trust the org's
+  TLS-inspecting proxy root CA. Provide a gitignored `certs/` directory in
+  both `backend/` and `frontend/`; both Dockerfiles should `apk add
+  --no-cache ca-certificates openssl` (⚠️ `node:20-alpine` does **not**
+  ship `ca-certificates` by default — this is a real, easy-to-hit build
+  failure, not a hypothetical), then `update-ca-certificates` + set
+  `NODE_EXTRA_CA_CERTS` if anything was dropped in `certs/`. Silent no-op
+  if the directory is empty, so it's always safe to leave wired up. Once
+  built, the running containers make zero outbound internet calls, so the
+  proxy only matters at build time, not runtime.
 - **Security/dependency hygiene**: keep production dependencies free of
   known-vulnerable packages (verify with `npm audit --omit=dev`
   periodically) — this app runs inside a corporate network and any
