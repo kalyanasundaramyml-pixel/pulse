@@ -1,0 +1,4 @@
+Place your organization's corporate root CA certificate here (e.g. zscaler-root.crt) so
+`docker build` can trust it when running `npm install` behind a TLS-inspecting proxy like
+Zscaler. Any *.crt files in this directory are picked up automatically; it's a no-op if empty.
+See the "Building behind Zscaler" section in the root README.md.

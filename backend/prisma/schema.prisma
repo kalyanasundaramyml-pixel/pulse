@@ -1,0 +1,424 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  LEADER
+  USER
+}
+
+enum SurveyStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum QuestionType {
+  RATING
+  TEXT
+  SINGLE_CHOICE
+  MULTI_CHOICE
+}
+
+enum OneOnOneRunStatus {
+  PENDING
+  COMPLETED
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  name                String
+  email               String    @unique
+  passwordHash        String    @map("password_hash")
+  role                UserRole  @default(USER)
+  mustChangePassword  Boolean   @default(true) @map("must_change_password")
+  isActive            Boolean   @default(true) @map("is_active")
+  lastLoginAt         DateTime? @map("last_login_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  createdSurveys       Survey[]               @relation("SurveyCreatedBy")
+  surveyRecipients     SurveyRecipient[]
+  attributedResponses  AttributedResponse[]
+  responseAccess       SurveyResponseAccess[]
+  importBatches        UserImportBatch[]
+  auditLogs            AuditLog[]
+  createdGroups        Group[]
+  groupMemberships     GroupMember[]
+
+  createdOneOnOneTemplates OneOnOneTemplate[]
+  oneOnOneRecipientOf      OneOnOneRecipient[]
+  oneOnOneRunsAsRespondent OneOnOneRun[]       @relation("OneOnOneRespondent")
+  oneOnOneRunsInitiated    OneOnOneRun[]       @relation("OneOnOneInitiator")
+
+  @@map("users")
+}
+
+model Group {
+  id          String        @id @default(uuid())
+  name        String
+  createdById String        @map("created_by")
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  members     GroupMember[]
+
+  @@map("groups")
+}
+
+model GroupMember {
+  id        String   @id @default(uuid())
+  groupId   String   @map("group_id")
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([groupId, userId])
+  @@map("group_members")
+}
+
+model Survey {
+  id           String        @id @default(uuid())
+  title        String
+  description  String?
+  isAnonymous  Boolean       @map("is_anonymous")
+  status       SurveyStatus  @default(DRAFT)
+  createdById  String        @map("created_by")
+  createdBy    User          @relation("SurveyCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  publishedAt  DateTime?     @map("published_at")
+  closedAt     DateTime?     @map("closed_at")
+  endDate      DateTime?     @map("end_date")
+  isTemplate   Boolean       @default(false) @map("is_template")
+  isPublic     Boolean       @default(false) @map("is_public")
+
+  questions           Question[]
+  recipients          SurveyRecipient[]
+  anonymousResponses  AnonymousResponse[]
+  attributedResponses AttributedResponse[]
+  responseAccess      SurveyResponseAccess[]
+
+  @@index([createdById])
+  @@map("surveys")
+}
+
+model Question {
+  id              String       @id @default(uuid())
+  surveyId        String       @map("survey_id")
+  survey          Survey       @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  position        Int
+  questionType    QuestionType @map("question_type")
+  prompt          String
+  isRequired      Boolean      @default(true) @map("is_required")
+  ratingScaleMin  Int?         @map("rating_scale_min")
+  ratingScaleMax  Int?         @map("rating_scale_max")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  options                QuestionOption[]
+  anonymousAnswers       AnonymousAnswer[]
+  attributedAnswers      AttributedAnswer[]
+
+  @@unique([surveyId, position])
+  @@map("questions")
+}
+
+model QuestionOption {
+  id          String    @id @default(uuid())
+  questionId  String    @map("question_id")
+  question    Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position    Int
+  label       String
+
+  anonymousAnswerOptions  AnonymousAnswerOption[]
+  attributedAnswerOptions AttributedAnswerOption[]
+
+  @@unique([questionId, position])
+  @@map("question_options")
+}
+
+model SurveyRecipient {
+  id         String   @id @default(uuid())
+  surveyId   String   @map("survey_id")
+  survey     Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([surveyId, userId])
+  @@index([userId])
+  @@map("survey_recipients")
+}
+
+// ===== ANONYMOUS response path: intentionally carries NO user reference =====
+
+model AnonymousResponse {
+  id           String   @id @default(uuid())
+  surveyId     String   @map("survey_id")
+  survey       Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  submittedAt  DateTime @default(now()) @map("submitted_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  answers  AnonymousAnswer[]
+  access   SurveyResponseAccess?
+
+  @@index([surveyId])
+  @@map("anonymous_responses")
+}
+
+model AnonymousAnswer {
+  id           String   @id @default(uuid())
+  responseId   String   @map("response_id")
+  response     AnonymousResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  questionId   String   @map("question_id")
+  question     Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  ratingValue  Int?     @map("rating_value")
+  textValue    String?  @map("text_value")
+  commentText  String?  @map("comment_text")
+
+  selectedOptions  AnonymousAnswerOption[]
+
+  @@unique([responseId, questionId])
+  @@index([questionId])
+  @@map("anonymous_answers")
+}
+
+model AnonymousAnswerOption {
+  id        String          @id @default(uuid())
+  answerId  String          @map("answer_id")
+  answer    AnonymousAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  optionId  String          @map("option_id")
+  option    QuestionOption  @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([answerId, optionId])
+  @@map("anonymous_answer_options")
+}
+
+// Backend-only linkage table. Sole mechanism for "have I already responded" and
+// "let me edit my response" on anonymous surveys. This model must NEVER be
+// queried from dashboard/leader-facing code (enforced by ESLint no-restricted-imports
+// on the repository module that owns access to this table).
+model SurveyResponseAccess {
+  id          String            @id @default(uuid())
+  surveyId    String            @map("survey_id")
+  survey      Survey            @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  userId      String            @map("user_id")
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  responseId  String            @unique @map("response_id")
+  response    AnonymousResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  @@unique([surveyId, userId])
+  @@map("survey_response_access")
+}
+
+// ===== ATTRIBUTED response path: identity is a first-class column =====
+
+model AttributedResponse {
+  id                 String   @id @default(uuid())
+  surveyId           String   @map("survey_id")
+  survey             Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  respondentUserId   String   @map("respondent_user_id")
+  respondentUser     User     @relation(fields: [respondentUserId], references: [id])
+  submittedAt        DateTime @default(now()) @map("submitted_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  answers  AttributedAnswer[]
+
+  @@unique([surveyId, respondentUserId])
+  @@index([surveyId])
+  @@map("attributed_responses")
+}
+
+model AttributedAnswer {
+  id           String   @id @default(uuid())
+  responseId   String   @map("response_id")
+  response     AttributedResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  questionId   String   @map("question_id")
+  question     Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  ratingValue  Int?     @map("rating_value")
+  textValue    String?  @map("text_value")
+  commentText  String?  @map("comment_text")
+
+  selectedOptions  AttributedAnswerOption[]
+
+  @@unique([responseId, questionId])
+  @@index([questionId])
+  @@map("attributed_answers")
+}
+
+model AttributedAnswerOption {
+  id        String           @id @default(uuid())
+  answerId  String           @map("answer_id")
+  answer    AttributedAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  optionId  String           @map("option_id")
+  option    QuestionOption   @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([answerId, optionId])
+  @@map("attributed_answer_options")
+}
+
+// ===== Admin / ops support =====
+
+model UserImportBatch {
+  id            String   @id @default(uuid())
+  importedById  String   @map("imported_by")
+  importedBy    User     @relation(fields: [importedById], references: [id])
+  filename      String?
+  totalRows     Int      @map("total_rows")
+  successCount  Int      @map("success_count")
+  errorCount    Int      @map("error_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  rowErrors  UserImportRowError[]
+
+  @@map("user_import_batches")
+}
+
+model UserImportRowError {
+  id         String           @id @default(uuid())
+  batchId    String           @map("batch_id")
+  batch      UserImportBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNumber  Int              @map("row_number")
+  rawRow     Json             @map("raw_row")
+  message    String
+
+  @@map("user_import_row_errors")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?  @map("actor_id")
+  actor       User?    @relation(fields: [actorId], references: [id])
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String?  @map("target_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
+
+// ===== One-on-Ones: recurring, always-attributed, trend-tracked check-ins.
+// Deliberately separate from Survey/Question/Response — a different usage
+// pattern (many runs per person over time vs. one campaign, one response
+// ever) that must not touch Survey's anonymity/one-response guarantees. =====
+
+model OneOnOneTemplate {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  createdById String   @map("created_by")
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  isArchived  Boolean  @default(false) @map("is_archived")
+  isPublic    Boolean  @default(false) @map("is_public")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  questions  OneOnOneQuestion[]
+  recipients OneOnOneRecipient[]
+  runs       OneOnOneRun[]
+
+  @@map("one_on_one_templates")
+}
+
+model OneOnOneQuestion {
+  id             String       @id @default(uuid())
+  templateId     String       @map("template_id")
+  template       OneOnOneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  position       Int
+  questionType   QuestionType @map("question_type")
+  prompt         String
+  isRequired     Boolean      @default(true) @map("is_required")
+  ratingScaleMin Int?         @map("rating_scale_min")
+  ratingScaleMax Int?         @map("rating_scale_max")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  options OneOnOneQuestionOption[]
+  answers OneOnOneAnswer[]
+
+  @@unique([templateId, position])
+  @@map("one_on_one_questions")
+}
+
+model OneOnOneQuestionOption {
+  id         String @id @default(uuid())
+  questionId String @map("question_id")
+  question   OneOnOneQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  position   Int
+  label      String
+
+  answerOptions OneOnOneAnswerOption[]
+
+  @@unique([questionId, position])
+  @@map("one_on_one_question_options")
+}
+
+model OneOnOneRecipient {
+  id         String   @id @default(uuid())
+  templateId String   @map("template_id")
+  template   OneOnOneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([templateId, userId])
+  @@map("one_on_one_recipients")
+}
+
+model OneOnOneRun {
+  id               String            @id @default(uuid())
+  templateId       String            @map("template_id")
+  template         OneOnOneTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  respondentUserId String            @map("respondent_user_id")
+  respondentUser   User              @relation("OneOnOneRespondent", fields: [respondentUserId], references: [id])
+  initiatedById    String            @map("initiated_by")
+  initiatedBy      User              @relation("OneOnOneInitiator", fields: [initiatedById], references: [id])
+  status           OneOnOneRunStatus @default(PENDING)
+  createdAt        DateTime          @default(now()) @map("created_at")
+  submittedAt      DateTime?         @map("submitted_at")
+
+  answers OneOnOneAnswer[]
+
+  // Deliberately NO unique([templateId, respondentUserId]) — many runs per
+  // person over time is the entire point.
+  @@index([templateId, respondentUserId])
+  @@map("one_on_one_runs")
+}
+
+model OneOnOneAnswer {
+  id          String @id @default(uuid())
+  runId       String @map("run_id")
+  run         OneOnOneRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  questionId  String @map("question_id")
+  question    OneOnOneQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  ratingValue Int?    @map("rating_value")
+  textValue   String? @map("text_value")
+  commentText String? @map("comment_text")
+
+  selectedOptions OneOnOneAnswerOption[]
+
+  @@unique([runId, questionId])
+  @@index([questionId])
+  @@map("one_on_one_answers")
+}
+
+model OneOnOneAnswerOption {
+  id       String @id @default(uuid())
+  answerId String @map("answer_id")
+  answer   OneOnOneAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  optionId String @map("option_id")
+  option   OneOnOneQuestionOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([answerId, optionId])
+  @@map("one_on_one_answer_options")
+}

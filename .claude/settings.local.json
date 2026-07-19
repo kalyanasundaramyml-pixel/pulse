@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)",
+      "Bash(tasklist)",
+      "Bash(curl -s http://localhost:4000/api/health)",
+      "Bash(npx prisma *)"
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
+  "env": { "node": true, "es2022": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+  "rules": {
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    {
+      "files": ["src/modules/dashboard/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "../responses/anonymousResponse.repository",
+                "message": "Dashboard code must never import the anonymous response identity-linkage repository. Anonymous survey results must stay structurally unlinkable to a respondent."
+              },
+              {
+                "name": "../../modules/responses/anonymousResponse.repository",
+                "message": "Dashboard code must never import the anonymous response identity-linkage repository. Anonymous survey results must stay structurally unlinkable to a respondent."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

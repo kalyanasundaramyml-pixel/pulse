@@ -1,0 +1,528 @@
+import { QuestionType, User } from '@prisma/client';
+import { prisma } from '../../db/prisma';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
+import { assertTemplateOwnerOrAdmin, assertCanViewOrUseTemplate, assertIsRecipient, getTemplateOr404 } from './oneOnOneAuth';
+import { recordAuditLog } from '../../lib/auditLog';
+
+// ===== Templates =====
+
+export async function createTemplate(user: User, input: { title: string; description?: string }) {
+  return prisma.oneOnOneTemplate.create({
+    data: { title: input.title, description: input.description, createdById: user.id },
+  });
+}
+
+export async function listTemplates(user: User, scope: 'created' | 'all' | 'public') {
+  if (scope === 'all' && user.role !== 'ADMIN') {
+    throw new ForbiddenError('Only Admins may list all one-on-one templates');
+  }
+  if (scope === 'public') {
+    return prisma.oneOnOneTemplate.findMany({
+      where: { isPublic: true, createdById: { not: user.id } },
+      orderBy: { createdAt: 'desc' },
+      include: { createdBy: { select: { id: true, name: true } } },
+    });
+  }
+  return prisma.oneOnOneTemplate.findMany({
+    where: scope === 'all' ? {} : { createdById: user.id },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function getTemplateDetail(templateId: string, user: User) {
+  const template = await assertCanViewOrUseTemplate(templateId, user);
+  const [questions, recipients, runCounts] = await Promise.all([
+    prisma.oneOnOneQuestion.findMany({
+      where: { templateId },
+      orderBy: { position: 'asc' },
+      include: { options: { orderBy: { position: 'asc' } } },
+    }),
+    prisma.oneOnOneRecipient.findMany({
+      where: { templateId },
+      include: { user: { select: { id: true, name: true, email: true } } },
+    }),
+    prisma.oneOnOneRun.groupBy({ by: ['respondentUserId'], where: { templateId }, _count: { _all: true } }),
+  ]);
+  const runCountByUser = new Map(runCounts.map((r) => [r.respondentUserId, r._count._all]));
+  return {
+    ...template,
+    questions,
+    recipients: recipients.map((r) => ({ ...r, runCount: runCountByUser.get(r.userId) ?? 0 })),
+  };
+}
+
+export async function updateTemplate(
+  templateId: string,
+  user: User,
+  input: { title?: string; description?: string; isArchived?: boolean; isPublic?: boolean },
+) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  return prisma.oneOnOneTemplate.update({ where: { id: templateId }, data: input });
+}
+
+export async function duplicateTemplate(templateId: string, user: User) {
+  const template = await assertCanViewOrUseTemplate(templateId, user);
+  const questions = await prisma.oneOnOneQuestion.findMany({
+    where: { templateId },
+    orderBy: { position: 'asc' },
+    include: { options: { orderBy: { position: 'asc' } } },
+  });
+
+  // Deliberately no recipients — a fork belongs to a different leader's own
+  // reports, so it always starts with an empty recipient list.
+  const duplicate = await prisma.oneOnOneTemplate.create({
+    data: {
+      title: `Copy of ${template.title}`,
+      description: template.description,
+      createdById: user.id,
+      isPublic: false,
+      questions: {
+        create: questions.map((q) => ({
+          position: q.position,
+          questionType: q.questionType,
+          prompt: q.prompt,
+          isRequired: q.isRequired,
+          ratingScaleMin: q.ratingScaleMin,
+          ratingScaleMax: q.ratingScaleMax,
+          options: { create: q.options.map((o) => ({ position: o.position, label: o.label })) },
+        })),
+      },
+    },
+  });
+
+  await recordAuditLog({
+    actorId: user.id,
+    action: 'ONE_ON_ONE_TEMPLATE_DUPLICATED',
+    targetType: 'OneOnOneTemplate',
+    targetId: duplicate.id,
+    metadata: { sourceTemplateId: templateId },
+  });
+
+  return duplicate;
+}
+
+export async function deleteTemplate(templateId: string, user: User) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const runCount = await prisma.oneOnOneRun.count({ where: { templateId } });
+  if (runCount > 0) {
+    throw new ConflictError(
+      'TEMPLATE_HAS_RUNS',
+      'This template already has 1:1 history and cannot be deleted. Archive it instead to hide it from new use.',
+    );
+  }
+  await prisma.oneOnOneTemplate.delete({ where: { id: templateId } });
+}
+
+// ===== Questions =====
+
+interface QuestionInput {
+  questionType: QuestionType;
+  prompt: string;
+  isRequired: boolean;
+  ratingScaleMin?: number;
+  ratingScaleMax?: number;
+  options?: string[];
+}
+
+async function countAnswersForQuestion(questionId: string): Promise<number> {
+  return prisma.oneOnOneAnswer.count({ where: { questionId } });
+}
+
+export async function addQuestion(templateId: string, user: User, input: QuestionInput) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const maxPosition = await prisma.oneOnOneQuestion.aggregate({ where: { templateId }, _max: { position: true } });
+  const position = (maxPosition._max.position ?? -1) + 1;
+
+  return prisma.oneOnOneQuestion.create({
+    data: {
+      templateId,
+      position,
+      questionType: input.questionType,
+      prompt: input.prompt,
+      isRequired: input.isRequired,
+      ratingScaleMin: input.ratingScaleMin,
+      ratingScaleMax: input.ratingScaleMax,
+      options: input.options
+        ? { create: input.options.map((label, idx) => ({ position: idx, label })) }
+        : undefined,
+    },
+    include: { options: true },
+  });
+}
+
+export async function updateQuestion(templateId: string, questionId: string, user: User, input: Partial<QuestionInput>) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, templateId } });
+  if (!question) {
+    throw new NotFoundError('Question not found');
+  }
+  const isStructuralChange =
+    (input.questionType !== undefined && input.questionType !== question.questionType) || input.options !== undefined;
+  if (isStructuralChange) {
+    const answerCount = await countAnswersForQuestion(questionId);
+    if (answerCount > 0) {
+      throw new ConflictError(
+        'QUESTION_HAS_RESPONSES',
+        'This question already has responses across past runs, so its type/options can no longer be restructured — that would corrupt trend history. You can still edit its prompt, required flag, or rating scale.',
+      );
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (input.options) {
+      await tx.oneOnOneQuestionOption.deleteMany({ where: { questionId } });
+      await tx.oneOnOneQuestionOption.createMany({
+        data: input.options.map((label, idx) => ({ questionId, position: idx, label })),
+      });
+    }
+    return tx.oneOnOneQuestion.update({
+      where: { id: questionId },
+      data: {
+        questionType: input.questionType,
+        prompt: input.prompt,
+        isRequired: input.isRequired,
+        ratingScaleMin: input.ratingScaleMin,
+        ratingScaleMax: input.ratingScaleMax,
+      },
+      include: { options: { orderBy: { position: 'asc' } } },
+    });
+  });
+}
+
+export async function deleteQuestion(templateId: string, questionId: string, user: User) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, templateId } });
+  if (!question) {
+    throw new NotFoundError('Question not found');
+  }
+  const answerCount = await countAnswersForQuestion(questionId);
+  if (answerCount > 0) {
+    throw new ConflictError('QUESTION_HAS_RESPONSES', 'Cannot delete a question that already has responses across past runs.');
+  }
+  await prisma.oneOnOneQuestion.delete({ where: { id: questionId } });
+}
+
+export async function reorderQuestions(templateId: string, user: User, questionIds: string[]) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const existing = await prisma.oneOnOneQuestion.findMany({ where: { templateId }, select: { id: true } });
+  const existingIds = new Set(existing.map((q) => q.id));
+  if (questionIds.length !== existing.length || !questionIds.every((id) => existingIds.has(id))) {
+    throw new ValidationError('questionIds must match the full set of question ids on this template');
+  }
+  await prisma.$transaction(
+    questionIds.map((id, idx) => prisma.oneOnOneQuestion.update({ where: { id }, data: { position: idx + 1000 } })),
+  );
+  await prisma.$transaction(
+    questionIds.map((id, idx) => prisma.oneOnOneQuestion.update({ where: { id }, data: { position: idx } })),
+  );
+}
+
+// ===== Recipients =====
+
+function assertNoSelfRecipient(template: { createdById: string }, userIds: string[]) {
+  if (userIds.includes(template.createdById)) {
+    throw new ValidationError('A 1:1 template cannot include its own creator as a recipient.');
+  }
+}
+
+export async function setRecipients(templateId: string, user: User, userIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+  assertNoSelfRecipient(template, userIds);
+  await prisma.$transaction([
+    prisma.oneOnOneRecipient.deleteMany({ where: { templateId, userId: { notIn: userIds } } }),
+    ...userIds.map((userId) =>
+      prisma.oneOnOneRecipient.upsert({
+        where: { templateId_userId: { templateId, userId } },
+        create: { templateId, userId },
+        update: {},
+      }),
+    ),
+  ]);
+}
+
+export async function addRecipients(templateId: string, user: User, userIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+  assertNoSelfRecipient(template, userIds);
+  await prisma.$transaction(
+    userIds.map((userId) =>
+      prisma.oneOnOneRecipient.upsert({
+        where: { templateId_userId: { templateId, userId } },
+        create: { templateId, userId },
+        update: {},
+      }),
+    ),
+  );
+}
+
+export async function removeRecipient(templateId: string, targetUserId: string, user: User) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  await prisma.oneOnOneRecipient
+    .delete({ where: { templateId_userId: { templateId, userId: targetUserId } } })
+    .catch(() => {
+      throw new NotFoundError('Recipient not found');
+    });
+}
+
+// ===== Runs (leader side) =====
+
+export async function startRun(templateId: string, user: User, recipientUserId: string) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  const recipient = await prisma.oneOnOneRecipient.findUnique({
+    where: { templateId_userId: { templateId, userId: recipientUserId } },
+  });
+  if (!recipient) {
+    throw new ValidationError('That user is not a recipient of this template');
+  }
+  const run = await prisma.oneOnOneRun.create({
+    data: { templateId, respondentUserId: recipientUserId, initiatedById: user.id },
+  });
+  await recordAuditLog({
+    actorId: user.id,
+    action: 'ONE_ON_ONE_RUN_STARTED',
+    targetType: 'OneOnOneRun',
+    targetId: run.id,
+    metadata: { templateId, recipientUserId },
+  });
+  return run;
+}
+
+export async function listRuns(templateId: string, user: User, recipientUserId?: string) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+  return prisma.oneOnOneRun.findMany({
+    where: { templateId, respondentUserId: recipientUserId },
+    orderBy: { createdAt: 'desc' },
+    include: { respondentUser: { select: { id: true, name: true, email: true } } },
+  });
+}
+
+// ===== Trend (leader side) =====
+
+interface RatingPoint {
+  runId: string;
+  submittedAt: Date;
+  value: number | null;
+  comment: string | null;
+}
+interface ChoicePoint {
+  runId: string;
+  submittedAt: Date;
+  selectedLabels: string[];
+  comment: string | null;
+}
+interface TextPoint {
+  runId: string;
+  submittedAt: Date;
+  text: string | null;
+}
+
+export async function getTrend(templateId: string, user: User, recipientUserId: string) {
+  await assertTemplateOwnerOrAdmin(templateId, user);
+
+  const [questions, runs] = await Promise.all([
+    prisma.oneOnOneQuestion.findMany({
+      where: { templateId },
+      orderBy: { position: 'asc' },
+      include: { options: { orderBy: { position: 'asc' } } },
+    }),
+    prisma.oneOnOneRun.findMany({
+      where: { templateId, respondentUserId: recipientUserId, status: 'COMPLETED' },
+      orderBy: { submittedAt: 'asc' },
+      include: { answers: { include: { selectedOptions: true } } },
+    }),
+  ]);
+
+  const questionSeries = questions.map((q) => {
+    if (q.questionType === 'RATING') {
+      const points: RatingPoint[] = runs.map((run) => {
+        const answer = run.answers.find((a) => a.questionId === q.id);
+        return {
+          runId: run.id,
+          submittedAt: run.submittedAt!,
+          value: answer?.ratingValue ?? null,
+          comment: answer?.commentText ?? null,
+        };
+      });
+      return { questionId: q.id, prompt: q.prompt, type: q.questionType, points };
+    }
+    if (q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') {
+      const optionLabelById = new Map(q.options.map((o) => [o.id, o.label]));
+      const points: ChoicePoint[] = runs.map((run) => {
+        const answer = run.answers.find((a) => a.questionId === q.id);
+        return {
+          runId: run.id,
+          submittedAt: run.submittedAt!,
+          selectedLabels: (answer?.selectedOptions ?? []).map((so) => optionLabelById.get(so.optionId) ?? '?'),
+          comment: answer?.commentText ?? null,
+        };
+      });
+      return { questionId: q.id, prompt: q.prompt, type: q.questionType, points };
+    }
+    // TEXT
+    const points: TextPoint[] = runs.map((run) => {
+      const answer = run.answers.find((a) => a.questionId === q.id);
+      return { runId: run.id, submittedAt: run.submittedAt!, text: answer?.textValue ?? null };
+    });
+    return { questionId: q.id, prompt: q.prompt, type: q.questionType, points };
+  });
+
+  return {
+    template: { id: templateId },
+    runCount: runs.length,
+    questions: questionSeries,
+  };
+}
+
+// ===== Taking a run (recipient side) =====
+
+interface AnswerInput {
+  questionId: string;
+  ratingValue?: number | null;
+  textValue?: string | null;
+  selectedOptionIds?: string[];
+  commentText?: string | null;
+}
+
+async function validateAnswers(templateId: string, answers: AnswerInput[]) {
+  const questions = await prisma.oneOnOneQuestion.findMany({
+    where: { templateId },
+    include: { options: true },
+  });
+  const questionsById = new Map(questions.map((q) => [q.id, q]));
+  const answersByQuestionId = new Map(answers.map((a) => [a.questionId, a]));
+
+  for (const question of questions) {
+    const answer = answersByQuestionId.get(question.id);
+    if (!answer) {
+      if (question.isRequired) {
+        throw new ValidationError(`Question "${question.prompt}" is required`);
+      }
+      continue;
+    }
+    if (question.questionType === 'RATING') {
+      if (answer.ratingValue == null) {
+        throw new ValidationError(`Question "${question.prompt}" requires a rating value`);
+      }
+      if (
+        (question.ratingScaleMin != null && answer.ratingValue < question.ratingScaleMin) ||
+        (question.ratingScaleMax != null && answer.ratingValue > question.ratingScaleMax)
+      ) {
+        throw new ValidationError(`Rating for "${question.prompt}" is out of range`);
+      }
+    } else if (question.questionType === 'TEXT') {
+      if (question.isRequired && !answer.textValue) {
+        throw new ValidationError(`Question "${question.prompt}" requires a text answer`);
+      }
+    } else if (question.questionType === 'SINGLE_CHOICE' || question.questionType === 'MULTI_CHOICE') {
+      const validOptionIds = new Set(question.options.map((o) => o.id));
+      const selected = answer.selectedOptionIds ?? [];
+      if (question.isRequired && selected.length === 0) {
+        throw new ValidationError(`Question "${question.prompt}" requires a selection`);
+      }
+      if (question.questionType === 'SINGLE_CHOICE' && selected.length > 1) {
+        throw new ValidationError(`Question "${question.prompt}" only allows one selected option`);
+      }
+      for (const optionId of selected) {
+        if (!validOptionIds.has(optionId)) {
+          throw new ValidationError(`Invalid option selected for "${question.prompt}"`);
+        }
+      }
+    }
+  }
+
+  for (const answer of answers) {
+    if (!questionsById.has(answer.questionId)) {
+      throw new ValidationError(`Unknown questionId: ${answer.questionId}`);
+    }
+  }
+}
+
+export async function getMyRuns(user: User) {
+  return prisma.oneOnOneRun.findMany({
+    where: { respondentUserId: user.id },
+    orderBy: { createdAt: 'desc' },
+    include: { template: { select: { id: true, title: true, description: true } } },
+  });
+}
+
+async function getRunForRespondent(runId: string, user: User) {
+  const run = await prisma.oneOnOneRun.findUnique({ where: { id: runId } });
+  if (!run) {
+    throw new NotFoundError('One-on-one run not found');
+  }
+  if (run.respondentUserId !== user.id) {
+    throw new ForbiddenError('This one-on-one run was not assigned to you');
+  }
+  return run;
+}
+
+export async function getTakeRun(runId: string, user: User) {
+  const run = await getRunForRespondent(runId, user);
+  const template = await getTemplateOr404(run.templateId);
+  const questions = await prisma.oneOnOneQuestion.findMany({
+    where: { templateId: run.templateId },
+    orderBy: { position: 'asc' },
+    include: { options: { orderBy: { position: 'asc' } } },
+  });
+
+  let myAnswers: AnswerInput[] | null = null;
+  if (run.status === 'COMPLETED') {
+    const answers = await prisma.oneOnOneAnswer.findMany({
+      where: { runId },
+      include: { selectedOptions: true },
+    });
+    myAnswers = answers.map((a) => ({
+      questionId: a.questionId,
+      ratingValue: a.ratingValue ?? undefined,
+      textValue: a.textValue ?? undefined,
+      selectedOptionIds: a.selectedOptions.map((so) => so.optionId),
+      commentText: a.commentText ?? undefined,
+    }));
+  }
+
+  return {
+    run: { id: run.id, status: run.status, createdAt: run.createdAt, submittedAt: run.submittedAt },
+    template: { id: template.id, title: template.title, description: template.description },
+    questions: questions.map((q) => ({
+      id: q.id,
+      questionType: q.questionType,
+      prompt: q.prompt,
+      isRequired: q.isRequired,
+      ratingScaleMin: q.ratingScaleMin,
+      ratingScaleMax: q.ratingScaleMax,
+      options: q.options.map((o) => ({ id: o.id, label: o.label })),
+    })),
+    answers: myAnswers,
+  };
+}
+
+export async function submitRun(runId: string, user: User, answers: AnswerInput[]) {
+  const run = await getRunForRespondent(runId, user);
+  if (run.status !== 'PENDING') {
+    throw new ConflictError('RUN_ALREADY_SUBMITTED', 'This one-on-one has already been submitted and cannot be changed.');
+  }
+  await validateAnswers(run.templateId, answers);
+
+  await prisma.$transaction(async (tx) => {
+    for (const answer of answers) {
+      const created = await tx.oneOnOneAnswer.create({
+        data: {
+          runId,
+          questionId: answer.questionId,
+          ratingValue: answer.ratingValue,
+          textValue: answer.textValue,
+          commentText: answer.commentText,
+        },
+      });
+      if (answer.selectedOptionIds?.length) {
+        await tx.oneOnOneAnswerOption.createMany({
+          data: answer.selectedOptionIds.map((optionId) => ({ answerId: created.id, optionId })),
+        });
+      }
+    }
+    await tx.oneOnOneRun.update({ where: { id: runId }, data: { status: 'COMPLETED', submittedAt: new Date() } });
+  });
+
+  return { runId };
+}
+
+export { getTemplateOr404, assertTemplateOwnerOrAdmin, assertIsRecipient };

@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-feedback}
+      POSTGRES_USER: ${POSTGRES_USER:-feedback}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-feedback}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks: [internal]
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-feedback}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-feedback}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      MIN_ANONYMOUS_RESPONSES_FOR_BREAKDOWN: ${MIN_ANONYMOUS_RESPONSES_FOR_BREAKDOWN:-3}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:?set ADMIN_BOOTSTRAP_EMAIL in .env}
+      ADMIN_BOOTSTRAP_NAME: ${ADMIN_BOOTSTRAP_NAME:-Administrator}
+      ADMIN_BOOTSTRAP_TEMP_PASSWORD: ${ADMIN_BOOTSTRAP_TEMP_PASSWORD:?set ADMIN_BOOTSTRAP_TEMP_PASSWORD in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+    restart: unless-stopped
+    networks: [internal]
+
+  web:
+    build: ./frontend
+    depends_on: [api]
+    ports:
+      - '${WEB_PORT:-80}:80'
+    restart: unless-stopped
+    networks: [internal]
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
