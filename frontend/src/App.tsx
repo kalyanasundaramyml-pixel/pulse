@@ -20,6 +20,7 @@ import { OneOnOneTrendPage } from './routes/oneOnOnes/OneOnOneTrendPage';
 import { TemplatesHubPage } from './routes/templates/TemplatesHubPage';
 import { SurveyTemplateListPage } from './routes/templates/SurveyTemplateListPage';
 import { OneOnOneTemplateListPage } from './routes/templates/OneOnOneTemplateListPage';
+import { HelpPage } from './routes/help/HelpPage';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
 
           <Route path="/one-on-ones" element={<OneOnOneListPage />} />
           <Route path="/one-on-ones/runs/:runId/take" element={<OneOnOneTakePage />} />
+          <Route path="/help" element={<HelpPage />} />
 
           <Route element={<ProtectedRoute roles={['LEADER', 'ADMIN']} />}>
             <Route path="/surveys/new" element={<SurveyBuilderPage />} />

@@ -35,6 +35,9 @@ function AppNav() {
           Admin
         </NavLink>
       )}
+      <NavLink to="/help" className={({ isActive }) => (isActive ? 'active' : '')}>
+        Help
+      </NavLink>
     </nav>
   );
 }
