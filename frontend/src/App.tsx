@@ -17,6 +17,9 @@ import { OneOnOneBuilderPage } from './routes/oneOnOnes/OneOnOneBuilderPage';
 import { OneOnOneRecipientsPage } from './routes/oneOnOnes/OneOnOneRecipientsPage';
 import { OneOnOneTakePage } from './routes/oneOnOnes/OneOnOneTakePage';
 import { OneOnOneTrendPage } from './routes/oneOnOnes/OneOnOneTrendPage';
+import { TemplatesHubPage } from './routes/templates/TemplatesHubPage';
+import { SurveyTemplateListPage } from './routes/templates/SurveyTemplateListPage';
+import { OneOnOneTemplateListPage } from './routes/templates/OneOnOneTemplateListPage';
 
 function App() {
   return (
@@ -36,11 +39,16 @@ function App() {
 
           <Route element={<ProtectedRoute roles={['LEADER', 'ADMIN']} />}>
             <Route path="/surveys/new" element={<SurveyBuilderPage />} />
+            <Route path="/surveys/templates" element={<SurveyTemplateListPage variant="pick" />} />
             <Route path="/surveys/:id/edit" element={<SurveyBuilderPage />} />
             <Route path="/surveys/:id/recipients" element={<SurveyRecipientsPage />} />
             <Route path="/groups" element={<GroupListPage />} />
             <Route path="/groups/:id" element={<GroupEditPage />} />
+            <Route path="/templates" element={<TemplatesHubPage />} />
+            <Route path="/templates/surveys" element={<SurveyTemplateListPage />} />
+            <Route path="/templates/one-on-ones" element={<OneOnOneTemplateListPage />} />
             <Route path="/one-on-ones/new" element={<OneOnOneBuilderPage />} />
+            <Route path="/one-on-ones/templates" element={<OneOnOneTemplateListPage variant="pick" />} />
             <Route path="/one-on-ones/:id/edit" element={<OneOnOneBuilderPage />} />
             <Route path="/one-on-ones/:id/recipients" element={<OneOnOneRecipientsPage />} />
             <Route path="/one-on-ones/:id/trend/:userId" element={<OneOnOneTrendPage />} />

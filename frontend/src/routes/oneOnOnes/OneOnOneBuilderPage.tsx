@@ -1,17 +1,21 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { oneOnOnesApi } from '../../api/oneOnOnes';
 import { OneOnOneTemplateDetail } from '../../types/api';
 import { ApiError } from '../../api/client';
-import { BlockApi, BlockList } from '../../components/surveys/BlockList';
+import { BlockApi, BlockList, BlockListHandle } from '../../components/surveys/BlockList';
 import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPanel';
 import { useAuth } from '../../hooks/useAuth';
+import { useTemplateNav } from '../../hooks/useTemplateNav';
 
 export function OneOnOneBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { setIsTemplateActive } = useTemplateNav();
+  const [searchParams] = useSearchParams();
   const isNew = !id;
+  const [isTemplate] = useState(searchParams.get('type') === 'template');
 
   const [template, setTemplate] = useState<OneOnOneTemplateDetail | null>(null);
   const [title, setTitle] = useState('');
@@ -21,6 +25,9 @@ export function OneOnOneBuilderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [startingRunFor, setStartingRunFor] = useState<string | null>(null);
   const [runStartedFor, setRunStartedFor] = useState<string | null>(null);
+  const [blocksDirty, setBlocksDirty] = useState(false);
+  const createdRef = useRef(false);
+  const blockListRef = useRef<BlockListHandle>(null);
 
   const blockApi: BlockApi = {
     addBlock: (name) => oneOnOnesApi.addBlock(id!, name),
@@ -40,6 +47,7 @@ export function OneOnOneBuilderPage() {
       setTemplate(res.template);
       setTitle(res.template.title);
       setDescription(res.template.description ?? '');
+      setBlocksDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load template');
     } finally {
@@ -52,19 +60,25 @@ export function OneOnOneBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    if (!isNew || createdRef.current) return;
+    createdRef.current = true;
     setError(null);
-    setSubmitting(true);
-    try {
-      const res = await oneOnOnesApi.create({ title, description: description || undefined });
-      navigate(`/one-on-ones/${res.template.id}/edit`, { replace: true });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create template');
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    oneOnOnesApi
+      .create({ title: isTemplate ? 'Untitled template' : 'Untitled one-on-one', isTemplate })
+      .then((res) => {
+        navigate(`/one-on-ones/${res.template.id}/edit`, { replace: true });
+      })
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : 'Failed to create template');
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew]);
+
+  useEffect(() => {
+    setIsTemplateActive(isTemplate || !!template?.isTemplate);
+    return () => setIsTemplateActive(false);
+  }, [isTemplate, template?.isTemplate, setIsTemplateActive]);
 
   async function handleSaveDetails(e?: FormEvent) {
     e?.preventDefault();
@@ -73,7 +87,11 @@ export function OneOnOneBuilderPage() {
     setSubmitting(true);
     try {
       await oneOnOnesApi.update(id, { title, description: description || undefined });
-      await loadTemplate(id);
+      if (blockListRef.current) {
+        await blockListRef.current.flush();
+      } else {
+        await loadTemplate(id);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save template');
     } finally {
@@ -111,6 +129,26 @@ export function OneOnOneBuilderPage() {
       navigate(`/one-on-ones/${res.template.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
+    }
+  }
+
+  function handleDiscardChanges() {
+    if (!template) return;
+    setTitle(template.title);
+    setDescription(template.description ?? '');
+    blockListRef.current?.discard();
+  }
+
+  async function handleDelete() {
+    if (!id || !template) return;
+    const warning = `Delete this ${template.isTemplate ? 'template' : 'one-on-one'}? This cannot be undone.`;
+    if (!window.confirm(warning)) return;
+    setError(null);
+    try {
+      await oneOnOnesApi.remove(id);
+      navigate('/one-on-ones');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete');
     }
   }
 
@@ -166,21 +204,7 @@ export function OneOnOneBuilderPage() {
   if (isNew) {
     return (
       <div className="page">
-        <h1>New 1:1 template</h1>
-        <form className="survey-form" onSubmit={handleCreate}>
-          <label>
-            Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. Monthly 1:1" />
-          </label>
-          <label>
-            Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Creating...' : 'Create template'}
-          </button>
-        </form>
+        {error ? <p className="form-error">{error}</p> : <p>Creating...</p>}
       </div>
     );
   }
@@ -189,6 +213,8 @@ export function OneOnOneBuilderPage() {
   if (!template) return <p className="form-error">{error ?? 'Template not found'}</p>;
 
   const isOwner = user?.role === 'ADMIN' || template.createdById === user?.id;
+  const hasUnsavedChanges =
+    title !== template.title || description !== (template.description ?? '') || blocksDirty;
 
   if (!isOwner) {
     return (
@@ -255,11 +281,6 @@ export function OneOnOneBuilderPage() {
             <button type="button" onClick={handleToggleArchive}>
               {template.isArchived ? 'Unarchive' : 'Archive'}
             </button>
-            {template.isTemplate && (
-              <button type="button" onClick={handleTogglePublic}>
-                {template.isPublic ? 'Make private' : 'Make public'}
-              </button>
-            )}
           </div>
         </div>
       ) : (
@@ -283,9 +304,12 @@ export function OneOnOneBuilderPage() {
         already has responses is limited to protect trend history.
       </p>
       <BlockList
+        ref={blockListRef}
         blocks={template.blocks}
         api={blockApi}
         editable={template.status === 'DRAFT'}
+        deferSave={template.isTemplate}
+        onDirtyChange={setBlocksDirty}
         onChanged={() => loadTemplate(id!)}
       />
 
@@ -297,20 +321,29 @@ export function OneOnOneBuilderPage() {
         <Link to={`/one-on-ones/${id}/recipients`} className="button">
           Manage recipients
         </Link>
-        {isEditableDetails && (
-          <button onClick={() => handleSaveDetails()} disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save details'}
-          </button>
-        )}
         {template.isTemplate ? (
-          <button onClick={handleInitiate} className="primary">
-            Initiate a one-on-one
-          </button>
+          <>
+            <button onClick={() => handleSaveDetails()} disabled={submitting || !hasUnsavedChanges}>
+              {submitting ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={handleDiscardChanges} disabled={!hasUnsavedChanges}>
+              Discard changes
+            </button>
+            <button onClick={handleTogglePublic}>{template.isPublic ? 'Make private' : 'Make public'}</button>
+            <button onClick={handleDelete} className="danger">
+              Delete template
+            </button>
+          </>
         ) : (
           <>
+            {isEditableDetails && (
+              <button onClick={() => handleSaveDetails()} disabled={submitting}>
+                {submitting ? 'Saving...' : 'Save details'}
+              </button>
+            )}
             {template.status === 'DRAFT' && (
               <button onClick={handlePublish} className="primary">
-                Publish
+                Initiate one-on-one
               </button>
             )}
             {template.status === 'PUBLISHED' && <button onClick={handleUnpublish}>Unpublish to edit</button>}

@@ -4,6 +4,7 @@ import { QuestionType } from '@prisma/client';
 export const createTemplateSchema = z.object({
   title: z.string().trim().min(1).max(300),
   description: z.string().trim().max(2000).optional(),
+  isTemplate: z.boolean().optional(),
 });
 
 export const updateTemplateSchema = z.object({

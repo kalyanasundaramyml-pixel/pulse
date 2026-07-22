@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { Block, Question } from '../../types/api';
 import { QuestionInput } from '../../api/surveys';
 import { QuestionEditor } from './QuestionEditor';
@@ -13,6 +13,11 @@ export interface BlockApi {
   updateQuestion: (blockId: string, questionId: string, input: Partial<QuestionInput>) => Promise<unknown>;
   deleteQuestion: (blockId: string, questionId: string) => Promise<unknown>;
   reorderQuestions: (blockId: string, questionIds: string[]) => Promise<unknown>;
+}
+
+export interface BlockListHandle {
+  flush: () => Promise<void>;
+  discard: () => void;
 }
 
 function ChevronUpIcon() {
@@ -59,14 +64,31 @@ function PencilIcon() {
   );
 }
 
-function BlockNameInput({ block, onSave }: { block: Block; onSave: (name: string) => void }) {
+// When deferSave is true, edits are held locally (reported via onDraftChange) instead
+// of persisted on blur — the parent decides when to flush() or discard() them, so a
+// block-text edit shows up in the same Save/Discard workflow as the title/description.
+function BlockNameInput({
+  block,
+  deferSave,
+  onSave,
+  onDraftChange,
+}: {
+  block: Block;
+  deferSave: boolean;
+  onSave: (name: string) => void;
+  onDraftChange?: (name: string) => void;
+}) {
   const [name, setName] = useState(block.name ?? '');
   return (
     <input
       className="block-name-input"
       value={name}
-      onChange={(e) => setName(e.target.value)}
+      onChange={(e) => {
+        setName(e.target.value);
+        if (deferSave) onDraftChange?.(e.target.value);
+      }}
       onBlur={() => {
+        if (deferSave) return;
         if (name.trim() && name.trim() !== block.name) onSave(name.trim());
       }}
     />
@@ -75,10 +97,14 @@ function BlockNameInput({ block, onSave }: { block: Block; onSave: (name: string
 
 function BlockTextEditor({
   block,
+  deferSave,
   onSave,
+  onDraftChange,
 }: {
   block: Block;
+  deferSave: boolean;
   onSave: (input: { title: string; body: string }) => void;
+  onDraftChange?: (input: { title: string; body: string }) => void;
 }) {
   const [title, setTitle] = useState(block.title ?? '');
   const [body, setBody] = useState(block.body ?? '');
@@ -86,14 +112,28 @@ function BlockTextEditor({
     <div className="block-text-editor">
       <label>
         Heading
-        <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => onSave({ title, body })} />
+        <input
+          value={title}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (deferSave) onDraftChange?.({ title: e.target.value, body });
+          }}
+          onBlur={() => {
+            if (!deferSave) onSave({ title, body });
+          }}
+        />
       </label>
       <label>
         Message
         <textarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={() => onSave({ title, body })}
+          onChange={(e) => {
+            setBody(e.target.value);
+            if (deferSave) onDraftChange?.({ title, body: e.target.value });
+          }}
+          onBlur={() => {
+            if (!deferSave) onSave({ title, body });
+          }}
           rows={3}
         />
       </label>
@@ -101,25 +141,65 @@ function BlockTextEditor({
   );
 }
 
-export function BlockList({
-  blocks,
-  api,
-  editable,
-  onChanged,
-}: {
-  blocks: Block[];
-  api: BlockApi;
-  editable: boolean;
-  onChanged: () => void | Promise<void>;
-}) {
+export const BlockList = forwardRef<
+  BlockListHandle,
+  {
+    blocks: Block[];
+    api: BlockApi;
+    editable: boolean;
+    onChanged: () => void | Promise<void>;
+    deferSave?: boolean;
+    onDirtyChange?: (dirty: boolean) => void;
+  }
+>(function BlockList({ blocks, api, editable, onChanged, deferSave = false, onDirtyChange }, ref) {
   const [editingQuestion, setEditingQuestion] = useState<{ blockId: string; question: Question } | null>(null);
   const [newBlockName, setNewBlockName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [resetKey, setResetKey] = useState(0);
+  const pendingText = useRef<Record<string, { title: string; body: string }>>({});
+  const pendingNames = useRef<Record<string, string>>({});
 
   const sorted = [...blocks].sort((a, b) => a.position - b.position);
   const welcome = sorted.find((b) => b.blockType === 'WELCOME');
   const end = sorted.find((b) => b.blockType === 'END');
   const questionBlocks = sorted.filter((b) => b.blockType === 'QUESTIONS');
+
+  function markDirty(blockId: string, patch: { title?: string; body?: string; name?: string }) {
+    if (patch.name !== undefined) pendingNames.current[blockId] = patch.name;
+    if (patch.title !== undefined || patch.body !== undefined) {
+      const existing = pendingText.current[blockId] ?? { title: '', body: '' };
+      pendingText.current[blockId] = { ...existing, ...patch };
+    }
+    onDirtyChange?.(true);
+  }
+
+  async function flush() {
+    const blockIds = new Set([...Object.keys(pendingText.current), ...Object.keys(pendingNames.current)]);
+    for (const blockId of blockIds) {
+      const input: { name?: string; title?: string; body?: string } = {};
+      const textPatch = pendingText.current[blockId];
+      const namePatch = pendingNames.current[blockId];
+      if (textPatch) {
+        input.title = textPatch.title;
+        input.body = textPatch.body;
+      }
+      if (namePatch !== undefined) input.name = namePatch;
+      await api.updateBlock(blockId, input);
+    }
+    pendingText.current = {};
+    pendingNames.current = {};
+    onDirtyChange?.(false);
+    await onChanged();
+  }
+
+  function discard() {
+    pendingText.current = {};
+    pendingNames.current = {};
+    onDirtyChange?.(false);
+    setResetKey((k) => k + 1);
+  }
+
+  useImperativeHandle(ref, () => ({ flush, discard }));
 
   async function run(fn: () => Promise<unknown>) {
     setError(null);
@@ -164,7 +244,13 @@ export function BlockList({
         <section className="block-card">
           <h3>Welcome</h3>
           {editable ? (
-            <BlockTextEditor block={welcome} onSave={(input) => run(() => api.updateBlock(welcome.id, input))} />
+            <BlockTextEditor
+              key={`${welcome.id}-${resetKey}`}
+              block={welcome}
+              deferSave={deferSave}
+              onSave={(input) => run(() => api.updateBlock(welcome.id, input))}
+              onDraftChange={(input) => markDirty(welcome.id, input)}
+            />
           ) : (
             <>
               {welcome.title && <p className="block-title-display">{welcome.title}</p>}
@@ -180,7 +266,13 @@ export function BlockList({
           <section className="block-card" key={block.id}>
             <div className="block-header">
               {editable ? (
-                <BlockNameInput block={block} onSave={(name) => run(() => api.updateBlock(block.id, { name }))} />
+                <BlockNameInput
+                  key={`${block.id}-${resetKey}`}
+                  block={block}
+                  deferSave={deferSave}
+                  onSave={(name) => run(() => api.updateBlock(block.id, { name }))}
+                  onDraftChange={(name) => markDirty(block.id, { name })}
+                />
               ) : (
                 <h3>{block.name}</h3>
               )}
@@ -302,7 +394,13 @@ export function BlockList({
         <section className="block-card">
           <h3>End</h3>
           {editable ? (
-            <BlockTextEditor block={end} onSave={(input) => run(() => api.updateBlock(end.id, input))} />
+            <BlockTextEditor
+              key={`${end.id}-${resetKey}`}
+              block={end}
+              deferSave={deferSave}
+              onSave={(input) => run(() => api.updateBlock(end.id, input))}
+              onDraftChange={(input) => markDirty(end.id, input)}
+            />
           ) : (
             <>
               {end.title && <p className="block-title-display">{end.title}</p>}
@@ -313,4 +411,4 @@ export function BlockList({
       )}
     </div>
   );
-}
+});

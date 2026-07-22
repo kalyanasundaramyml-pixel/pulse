@@ -1,20 +1,58 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { oneOnOnesApi } from '../../api/oneOnOnes';
 import { OneOnOneRun, OneOnOneTemplate } from '../../types/api';
 import { useAuth } from '../../hooks/useAuth';
-import { ApiError } from '../../api/client';
+
+function ChevronDownIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function NewOneOnOneMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  return (
+    <div className="split-menu" ref={ref}>
+      <button type="button" className="button primary" onClick={() => setOpen((o) => !o)}>
+        New One-on-One <ChevronDownIcon />
+      </button>
+      {open && (
+        <div className="split-menu-list">
+          <Link to="/one-on-ones/new" onClick={() => setOpen(false)}>
+            Create fresh
+          </Link>
+          <Link to="/one-on-ones/templates" onClick={() => setOpen(false)}>
+            Use a template
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function OneOnOneListPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<'assigned' | 'initiated' | 'templates'>('assigned');
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  const [tab, setTab] = useState<'assigned' | 'initiated'>(initialTab === 'initiated' ? 'initiated' : 'assigned');
   const [assignedFilter, setAssignedFilter] = useState<'todo' | 'completed'>('todo');
   const [initiatedFilter, setInitiatedFilter] = useState<'draft' | 'published'>('draft');
   const [runs, setRuns] = useState<OneOnOneRun[]>([]);
   const [mine, setMine] = useState<OneOnOneTemplate[]>([]);
-  const [publicTemplates, setPublicTemplates] = useState<OneOnOneTemplate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const canManage = user?.role === 'LEADER' || user?.role === 'ADMIN';
 
@@ -26,33 +64,13 @@ export function OneOnOneListPage() {
         .then((res) => setRuns(res.runs))
         .finally(() => setLoading(false));
     } else {
-      Promise.all([oneOnOnesApi.list('created'), oneOnOnesApi.list('public')])
-        .then(([mineRes, pubRes]) => {
-          setMine(mineRes.templates);
-          setPublicTemplates(pubRes.templates);
-        })
+      oneOnOnesApi
+        .list('created')
+        .then((res) => setMine(res.templates))
         .finally(() => setLoading(false));
     }
   }, [tab]);
 
-  async function refetchMine() {
-    const [mineRes, pubRes] = await Promise.all([oneOnOnesApi.list('created'), oneOnOnesApi.list('public')]);
-    setMine(mineRes.templates);
-    setPublicTemplates(pubRes.templates);
-  }
-
-  async function handleCopyToMyTemplates(templateId: string) {
-    setError(null);
-    try {
-      await oneOnOnesApi.duplicateTemplate(templateId, true);
-      setTab('templates');
-      await refetchMine();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
-    }
-  }
-
-  const templates = [...mine.filter((t) => t.isTemplate), ...publicTemplates];
   const initiated = mine
     .filter((t) => !t.isTemplate)
     .filter((t) => (initiatedFilter === 'published' ? t.status === 'PUBLISHED' : t.status === 'DRAFT'));
@@ -62,11 +80,7 @@ export function OneOnOneListPage() {
     <div className="page">
       <div className="page-header">
         <h1>One-on-Ones</h1>
-        {canManage && tab === 'templates' && (
-          <Link to="/one-on-ones/new" className="button">
-            New template
-          </Link>
-        )}
+        {canManage && <NewOneOnOneMenu />}
       </div>
       {canManage && (
         <div className="tabs">
@@ -75,9 +89,6 @@ export function OneOnOneListPage() {
           </button>
           <button className={tab === 'initiated' ? 'active' : ''} onClick={() => setTab('initiated')}>
             Initiated by me
-          </button>
-          <button className={tab === 'templates' ? 'active' : ''} onClick={() => setTab('templates')}>
-            Templates
           </button>
         </div>
       )}
@@ -108,8 +119,6 @@ export function OneOnOneListPage() {
         </div>
       )}
 
-      {error && <p className="form-error">{error}</p>}
-
       {loading ? (
         <p>Loading...</p>
       ) : tab === 'assigned' ? (
@@ -130,46 +139,21 @@ export function OneOnOneListPage() {
             ))}
           </ul>
         )
-      ) : tab === 'initiated' ? (
-        initiated.length === 0 ? (
-          <p className="empty-state">
-            No {initiatedFilter} one-on-ones yet — start one from a template under the Templates tab.
-          </p>
-        ) : (
-          <ul className="survey-list">
-            {initiated.map((t) => (
-              <li key={t.id}>
-                <Link to={`/one-on-ones/${t.id}/edit`}>
-                  <span className="survey-title">{t.title}</span>
-                  <span className={`status-badge ${t.status.toLowerCase()}`}>{t.status}</span>
-                  {t.isArchived && <span className="status-badge closed">ARCHIVED</span>}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )
-      ) : templates.length === 0 ? (
-        <p className="empty-state">No templates yet — create one to start running 1:1s.</p>
+      ) : initiated.length === 0 ? (
+        <p className="empty-state">
+          No {initiatedFilter} one-on-ones yet — start one from a template under Templates or create a fresh one.
+        </p>
       ) : (
         <ul className="survey-list">
-          {templates.map((t) => {
-            const isOwn = t.createdById === user?.id;
-            return (
-              <li key={t.id}>
-                <Link to={`/one-on-ones/${t.id}/edit`}>
-                  <span className="survey-title">{t.title}</span>
-                  {t.isArchived && <span className="status-badge closed">ARCHIVED</span>}
-                  {t.isPublic && <span className="status-badge public">Public</span>}
-                  {!isOwn && t.createdBy && <span className="muted">by {t.createdBy.name}</span>}
-                </Link>
-                {!isOwn && (
-                  <button onClick={() => handleCopyToMyTemplates(t.id)} className="dashboard-link">
-                    Copy to my templates
-                  </button>
-                )}
-              </li>
-            );
-          })}
+          {initiated.map((t) => (
+            <li key={t.id}>
+              <Link to={`/one-on-ones/${t.id}/edit`}>
+                <span className="survey-title">{t.title}</span>
+                <span className={`status-badge ${t.status.toLowerCase()}`}>{t.status}</span>
+                {t.isArchived && <span className="status-badge closed">ARCHIVED</span>}
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
     </div>

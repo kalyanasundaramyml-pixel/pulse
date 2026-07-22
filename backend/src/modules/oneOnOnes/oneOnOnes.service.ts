@@ -16,11 +16,12 @@ function assertDraft(template: OneOnOneTemplate) {
 
 // ===== Templates =====
 
-export async function createTemplate(user: User, input: { title: string; description?: string }) {
+export async function createTemplate(user: User, input: { title: string; description?: string; isTemplate?: boolean }) {
   return prisma.oneOnOneTemplate.create({
     data: {
       title: input.title,
       description: input.description,
+      isTemplate: input.isTemplate ?? true,
       createdById: user.id,
       blocks: {
         create: [

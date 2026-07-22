@@ -1,12 +1,51 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { surveysApi } from '../../api/surveys';
 import { Survey } from '../../types/api';
 import { useAuth } from '../../hooks/useAuth';
 
+function ChevronDownIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function NewSurveyMenu() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  return (
+    <div className="split-menu" ref={ref}>
+      <button type="button" className="button primary" onClick={() => setOpen((o) => !o)}>
+        New survey <ChevronDownIcon />
+      </button>
+      {open && (
+        <div className="split-menu-list">
+          <Link to="/surveys/new" onClick={() => setOpen(false)}>
+            Create fresh
+          </Link>
+          <Link to="/surveys/templates" onClick={() => setOpen(false)}>
+            Use a template
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SurveyListPage() {
   const { user } = useAuth();
-  const [scope, setScope] = useState<'created' | 'targeted' | 'templates'>('targeted');
+  const [scope, setScope] = useState<'created' | 'targeted'>('targeted');
   const [statusTab, setStatusTab] = useState<'draft' | 'active' | 'closed'>('active');
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -15,47 +54,33 @@ export function SurveyListPage() {
 
   useEffect(() => {
     setLoading(true);
-    if (scope === 'templates') {
-      Promise.all([surveysApi.list('created'), surveysApi.list('public')])
-        .then(([mine, pub]) => {
-          setSurveys([...mine.surveys.filter((s) => s.isTemplate), ...pub.surveys]);
-        })
-        .finally(() => setLoading(false));
-    } else {
-      surveysApi
-        .list(scope)
-        .then((res) => setSurveys(res.surveys))
-        .finally(() => setLoading(false));
-    }
+    surveysApi
+      .list(scope)
+      .then((res) => setSurveys(res.surveys))
+      .finally(() => setLoading(false));
   }, [scope]);
 
-  function changeScope(next: 'created' | 'targeted' | 'templates') {
+  function changeScope(next: 'created' | 'targeted') {
     setScope(next);
     // "Drafts" only exists under "Created by me" — reset if it wouldn't apply.
     if (next !== 'created' && statusTab === 'draft') setStatusTab('active');
   }
 
   const visibleSurveys =
-    scope === 'templates'
+    scope === 'created'
       ? surveys
-      : scope === 'created'
-        ? surveys
-            .filter((s) => !s.isTemplate)
-            .filter((s) => (statusTab === 'draft' ? 'DRAFT' : statusTab === 'closed' ? 'CLOSED' : 'PUBLISHED') === s.status)
-        : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
-          surveys
-            .filter((s) => s.status !== 'DRAFT')
-            .filter((s) => (statusTab === 'closed' ? s.status === 'CLOSED' : s.status !== 'CLOSED'));
+          .filter((s) => !s.isTemplate)
+          .filter((s) => (statusTab === 'draft' ? 'DRAFT' : statusTab === 'closed' ? 'CLOSED' : 'PUBLISHED') === s.status)
+      : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
+        surveys
+          .filter((s) => s.status !== 'DRAFT')
+          .filter((s) => (statusTab === 'closed' ? s.status === 'CLOSED' : s.status !== 'CLOSED'));
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>Surveys</h1>
-        {canCreate && (
-          <Link to="/surveys/new" className="button">
-            New survey
-          </Link>
-        )}
+        {canCreate && <NewSurveyMenu />}
       </div>
       {canCreate && (
         <div className="tabs">
@@ -64,9 +89,6 @@ export function SurveyListPage() {
           </button>
           <button className={scope === 'created' ? 'active' : ''} onClick={() => changeScope('created')}>
             Created by me
-          </button>
-          <button className={scope === 'templates' ? 'active' : ''} onClick={() => changeScope('templates')}>
-            Templates
           </button>
         </div>
       )}
@@ -96,37 +118,25 @@ export function SurveyListPage() {
       {loading ? (
         <p>Loading...</p>
       ) : visibleSurveys.length === 0 ? (
-        <p className="empty-state">
-          {scope === 'templates' ? 'No templates here yet.' : `No ${statusTab === 'draft' ? 'draft' : statusTab} surveys here yet.`}
-        </p>
+        <p className="empty-state">No {statusTab === 'draft' ? 'draft' : statusTab} surveys here yet.</p>
       ) : (
         <ul className="survey-list">
-          {visibleSurveys.map((s) => {
-            const isOwn = s.createdById === user?.id;
-            return (
-              <li key={s.id}>
-                <Link to={scope === 'targeted' ? `/surveys/${s.id}/take` : `/surveys/${s.id}/edit`}>
-                  <span className="survey-title">{s.title}</span>
-                  {scope === 'templates' ? (
-                    <>
-                      {s.isPublic && <span className="status-badge public">Public</span>}
-                      {!isOwn && s.createdBy && <span className="muted">by {s.createdBy.name}</span>}
-                    </>
-                  ) : (
-                    <span className={`status-badge ${s.status.toLowerCase()}`}>{s.status}</span>
-                  )}
-                  <span className={`anon-tag ${s.isAnonymous ? 'anonymous' : 'attributed'}`}>
-                    {s.isAnonymous ? 'Anonymous' : 'Attributed'}
-                  </span>
+          {visibleSurveys.map((s) => (
+            <li key={s.id}>
+              <Link to={scope === 'targeted' ? `/surveys/${s.id}/take` : `/surveys/${s.id}/edit`}>
+                <span className="survey-title">{s.title}</span>
+                <span className={`status-badge ${s.status.toLowerCase()}`}>{s.status}</span>
+                <span className={`anon-tag ${s.isAnonymous ? 'anonymous' : 'attributed'}`}>
+                  {s.isAnonymous ? 'Anonymous' : 'Attributed'}
+                </span>
+              </Link>
+              {scope === 'created' && (
+                <Link to={`/surveys/${s.id}/dashboard`} className="dashboard-link">
+                  Dashboard
                 </Link>
-                {scope === 'created' && (
-                  <Link to={`/surveys/${s.id}/dashboard`} className="dashboard-link">
-                    Dashboard
-                  </Link>
-                )}
-              </li>
-            );
-          })}
+              )}
+            </li>
+          ))}
         </ul>
       )}
     </div>

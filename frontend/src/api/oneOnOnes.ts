@@ -12,7 +12,7 @@ import {
 import { QuestionInput } from './surveys';
 
 export const oneOnOnesApi = {
-  create: (input: { title: string; description?: string }) =>
+  create: (input: { title: string; description?: string; isTemplate?: boolean }) =>
     apiClient.post<{ template: OneOnOneTemplate }>('/one-on-ones', input),
   list: (scope: 'created' | 'all' | 'public' = 'created') =>
     apiClient.get<{ templates: OneOnOneTemplate[] }>(`/one-on-ones?scope=${scope}`),

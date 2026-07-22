@@ -1,17 +1,20 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { surveysApi } from '../../api/surveys';
 import { SurveyDetail } from '../../types/api';
 import { ApiError } from '../../api/client';
-import { BlockApi, BlockList } from '../../components/surveys/BlockList';
+import { BlockApi, BlockList, BlockListHandle } from '../../components/surveys/BlockList';
 import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPanel';
 import { AnonymityBadge } from '../../components/surveys/AnonymityBadge';
 import { useAuth } from '../../hooks/useAuth';
+import { useTemplateNav } from '../../hooks/useTemplateNav';
 
 export function SurveyBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { setIsTemplateActive } = useTemplateNav();
+  const [searchParams] = useSearchParams();
   const isNew = !id;
 
   const [survey, setSurvey] = useState<SurveyDetail | null>(null);
@@ -19,12 +22,15 @@ export function SurveyBuilderPage() {
   const [description, setDescription] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [endDate, setEndDate] = useState('');
-  const [isTemplate, setIsTemplate] = useState(false);
+  const [isTemplate] = useState(searchParams.get('type') === 'template');
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [reopenDate, setReopenDate] = useState('');
   const [showReopenForm, setShowReopenForm] = useState(false);
+  const [blocksDirty, setBlocksDirty] = useState(false);
+  const createdRef = useRef(false);
+  const blockListRef = useRef<BlockListHandle>(null);
 
   const blockApi: BlockApi = {
     addBlock: (name) => surveysApi.addBlock(id!, name),
@@ -47,6 +53,7 @@ export function SurveyBuilderPage() {
       setIsAnonymous(res.survey.isAnonymous);
       setEndDate(res.survey.endDate ? res.survey.endDate.slice(0, 10) : '');
       setShowReopenForm(false);
+      setBlocksDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load survey');
     } finally {
@@ -59,25 +66,47 @@ export function SurveyBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    if (!isNew || createdRef.current) return;
+    createdRef.current = true;
     setError(null);
-    setSubmitting(true);
-    try {
-      const res = await surveysApi.create({
-        title,
-        description: description || undefined,
-        isAnonymous,
-        endDate: isTemplate ? null : endDate || null,
+    surveysApi
+      .create({
+        title: isTemplate ? 'Untitled template' : 'Untitled survey',
+        isAnonymous: true,
         isTemplate,
+      })
+      .then((res) => {
+        navigate(`/surveys/${res.survey.id}/edit`, { replace: true });
+      })
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : 'Failed to create survey');
       });
-      navigate(`/surveys/${res.survey.id}/edit`, { replace: true });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create survey');
-    } finally {
-      setSubmitting(false);
-    }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew]);
+
+  useEffect(() => {
+    setIsTemplateActive(isTemplate || !!survey?.isTemplate);
+    return () => setIsTemplateActive(false);
+  }, [isTemplate, survey?.isTemplate, setIsTemplateActive]);
+
+  // Live (non-template) drafts autosave as you type — no manual "Save details" step.
+  // Templates keep an explicit Save/Discard so a deliberate edit to a reusable asset
+  // isn't silently persisted.
+  useEffect(() => {
+    if (!survey || survey.isTemplate || survey.status !== 'DRAFT') return;
+    const changed =
+      title !== survey.title ||
+      description !== (survey.description ?? '') ||
+      isAnonymous !== survey.isAnonymous ||
+      endDate !== (survey.endDate ? survey.endDate.slice(0, 10) : '');
+    if (!changed) return;
+    const timer = setTimeout(() => {
+      handleSaveDetails();
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, isAnonymous, endDate, survey]);
 
   async function handleSaveDetails(e?: FormEvent) {
     e?.preventDefault();
@@ -86,7 +115,11 @@ export function SurveyBuilderPage() {
     setSubmitting(true);
     try {
       await surveysApi.update(id, { title, description: description || undefined, isAnonymous, endDate: endDate || null });
-      await loadSurvey(id);
+      if (blockListRef.current) {
+        await blockListRef.current.flush();
+      } else {
+        await loadSurvey(id);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save survey');
     } finally {
@@ -177,6 +210,15 @@ export function SurveyBuilderPage() {
     }
   }
 
+  function handleDiscardChanges() {
+    if (!survey) return;
+    setTitle(survey.title);
+    setDescription(survey.description ?? '');
+    setIsAnonymous(survey.isAnonymous);
+    setEndDate(survey.endDate ? survey.endDate.slice(0, 10) : '');
+    blockListRef.current?.discard();
+  }
+
   async function handleDelete() {
     if (!id || !survey) return;
     const warning = isDraft
@@ -195,35 +237,7 @@ export function SurveyBuilderPage() {
   if (isNew) {
     return (
       <div className="page">
-        <h1>New survey</h1>
-        <form className="survey-form" onSubmit={handleCreate}>
-          <label>
-            Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-          </label>
-          <label>
-            Description
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-          </label>
-          <label className="checkbox-label">
-            <input type="checkbox" checked={isAnonymous} onChange={(e) => setIsAnonymous(e.target.checked)} />
-            Anonymous survey (respondent identity will not be linked to answers)
-          </label>
-          <label className="checkbox-label">
-            <input type="checkbox" checked={isTemplate} onChange={(e) => setIsTemplate(e.target.checked)} />
-            Save as a reusable template instead of a live survey
-          </label>
-          {!isTemplate && (
-            <label>
-              End date (optional)
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </label>
-          )}
-          {error && <p className="form-error">{error}</p>}
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Creating...' : isTemplate ? 'Create template' : 'Create draft'}
-          </button>
-        </form>
+        {error ? <p className="form-error">{error}</p> : <p>Creating...</p>}
       </div>
     );
   }
@@ -234,6 +248,12 @@ export function SurveyBuilderPage() {
   const isDraft = survey.status === 'DRAFT';
   const isAnonymityLocked = survey.publishedAt != null;
   const isOwner = user?.role === 'ADMIN' || survey.createdById === user?.id;
+  const hasUnsavedChanges =
+    title !== survey.title ||
+    description !== (survey.description ?? '') ||
+    isAnonymous !== survey.isAnonymous ||
+    endDate !== (survey.endDate ? survey.endDate.slice(0, 10) : '') ||
+    blocksDirty;
 
   if (survey.isTemplate && !isOwner) {
     return (
@@ -287,6 +307,7 @@ export function SurveyBuilderPage() {
 
       {isDraft ? (
         <div className="survey-form">
+          {!survey.isTemplate && submitting && <p className="muted">Saving...</p>}
           <label>
             Title
             <input value={title} onChange={(e) => setTitle(e.target.value)} required />
@@ -326,7 +347,15 @@ export function SurveyBuilderPage() {
 
       {error && <p className="form-error">{error}</p>}
 
-      <BlockList blocks={survey.blocks} api={blockApi} editable={isDraft} onChanged={() => loadSurvey(id!)} />
+      <BlockList
+        ref={blockListRef}
+        blocks={survey.blocks}
+        api={blockApi}
+        editable={isDraft}
+        deferSave={survey.isTemplate}
+        onDirtyChange={setBlocksDirty}
+        onChanged={() => loadSurvey(id!)}
+      />
 
       <section>
         <h2>Recipients ({survey.recipients.length})</h2>
@@ -336,15 +365,13 @@ export function SurveyBuilderPage() {
         <Link to={`/surveys/${id}/recipients`} className="button">
           Manage recipients
         </Link>
-        {isDraft && (
-          <button onClick={() => handleSaveDetails()} disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save details'}
-          </button>
-        )}
         {survey.isTemplate ? (
           <>
-            <button onClick={handleStartSurvey} className="primary">
-              Start a survey
+            <button onClick={() => handleSaveDetails()} disabled={submitting || !hasUnsavedChanges}>
+              {submitting ? 'Saving...' : 'Save'}
+            </button>
+            <button onClick={handleDiscardChanges} disabled={!hasUnsavedChanges}>
+              Discard changes
             </button>
             <button onClick={handleTogglePublic}>{survey.isPublic ? 'Make private' : 'Make public'}</button>
           </>
