@@ -51,8 +51,62 @@ export const deleteTemplate: RequestHandler = async (req, res, next) => {
 
 export const duplicateTemplate: RequestHandler = async (req, res, next) => {
   try {
-    const template = await service.duplicateTemplate(req.params.id, req.user!);
+    const template = await service.duplicateTemplate(req.params.id, req.user!, req.body.asTemplate);
     res.status(201).json({ template });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const publishTemplate: RequestHandler = async (req, res, next) => {
+  try {
+    const template = await service.publishTemplate(req.params.id, req.user!);
+    res.json({ template });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const unpublishTemplate: RequestHandler = async (req, res, next) => {
+  try {
+    const template = await service.unpublishTemplate(req.params.id, req.user!);
+    res.json({ template });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const addBlock: RequestHandler = async (req, res, next) => {
+  try {
+    const block = await service.addBlock(req.params.id, req.user!, req.body.name);
+    res.status(201).json({ block });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateBlock: RequestHandler = async (req, res, next) => {
+  try {
+    const block = await service.updateBlock(req.params.id, req.params.blockId, req.user!, req.body);
+    res.json({ block });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteBlock: RequestHandler = async (req, res, next) => {
+  try {
+    await service.deleteBlock(req.params.id, req.params.blockId, req.user!);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const reorderBlocks: RequestHandler = async (req, res, next) => {
+  try {
+    await service.reorderBlocks(req.params.id, req.user!, req.body.blockIds);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }
@@ -60,7 +114,7 @@ export const duplicateTemplate: RequestHandler = async (req, res, next) => {
 
 export const addQuestion: RequestHandler = async (req, res, next) => {
   try {
-    const question = await service.addQuestion(req.params.id, req.user!, req.body);
+    const question = await service.addQuestion(req.params.id, req.params.blockId, req.user!, req.body);
     res.status(201).json({ question });
   } catch (err) {
     next(err);
@@ -69,7 +123,13 @@ export const addQuestion: RequestHandler = async (req, res, next) => {
 
 export const updateQuestion: RequestHandler = async (req, res, next) => {
   try {
-    const question = await service.updateQuestion(req.params.id, req.params.qid, req.user!, req.body);
+    const question = await service.updateQuestion(
+      req.params.id,
+      req.params.blockId,
+      req.params.qid,
+      req.user!,
+      req.body,
+    );
     res.json({ question });
   } catch (err) {
     next(err);
@@ -78,7 +138,7 @@ export const updateQuestion: RequestHandler = async (req, res, next) => {
 
 export const deleteQuestion: RequestHandler = async (req, res, next) => {
   try {
-    await service.deleteQuestion(req.params.id, req.params.qid, req.user!);
+    await service.deleteQuestion(req.params.id, req.params.blockId, req.params.qid, req.user!);
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -87,7 +147,7 @@ export const deleteQuestion: RequestHandler = async (req, res, next) => {
 
 export const reorderQuestions: RequestHandler = async (req, res, next) => {
   try {
-    await service.reorderQuestions(req.params.id, req.user!, req.body.questionIds);
+    await service.reorderQuestions(req.params.id, req.params.blockId, req.user!, req.body.questionIds);
     res.status(204).end();
   } catch (err) {
     next(err);

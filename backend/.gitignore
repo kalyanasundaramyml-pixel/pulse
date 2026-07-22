@@ -4,3 +4,4 @@ dist
 *.log
 certs/*.crt
 certs/*.pem
+*.tsbuildinfo

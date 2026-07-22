@@ -34,6 +34,20 @@ export const listSurveysQuerySchema = z.object({
   status: z.enum(['DRAFT', 'PUBLISHED', 'CLOSED']).optional(),
 });
 
+export const createBlockSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+});
+
+export const updateBlockSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  body: z.string().trim().max(4000).optional(),
+});
+
+export const reorderBlocksSchema = z.object({
+  blockIds: z.array(z.string().uuid()).min(1),
+});
+
 const questionBaseSchema = z.object({
   questionType: z.nativeEnum(QuestionType),
   prompt: z.string().trim().min(1).max(1000),

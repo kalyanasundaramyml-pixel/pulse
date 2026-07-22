@@ -1,6 +1,8 @@
 export type UserRole = 'ADMIN' | 'LEADER' | 'USER';
 export type SurveyStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED';
+export type OneOnOneStatus = 'DRAFT' | 'PUBLISHED';
 export type QuestionType = 'RATING' | 'TEXT' | 'SINGLE_CHOICE' | 'MULTI_CHOICE';
+export type BlockType = 'WELCOME' | 'QUESTIONS' | 'END';
 
 export interface PublicUser {
   id: string;
@@ -51,6 +53,16 @@ export interface Question {
   options: QuestionOption[];
 }
 
+export interface Block {
+  id: string;
+  position: number;
+  blockType: BlockType;
+  name: string | null;
+  title: string | null;
+  body: string | null;
+  questions: Question[];
+}
+
 export interface Survey {
   id: string;
   title: string;
@@ -69,7 +81,7 @@ export interface Survey {
 }
 
 export interface SurveyDetail extends Survey {
-  questions: Question[];
+  blocks: Block[];
   recipients: { user: DirectoryUser }[];
 }
 
@@ -89,7 +101,7 @@ export interface TakeSurveyResponse {
     isAnonymous: boolean;
     status: SurveyStatus;
   };
-  questions: Question[];
+  blocks: Block[];
   alreadyResponded: boolean;
   myResponse: {
     answers: AnswerInput[];
@@ -164,13 +176,15 @@ export interface OneOnOneTemplate {
   createdById: string;
   isArchived: boolean;
   isPublic: boolean;
+  isTemplate: boolean;
+  status: OneOnOneStatus;
   createdAt: string;
   updatedAt: string;
   createdBy?: { id: string; name: string };
 }
 
 export interface OneOnOneTemplateDetail extends OneOnOneTemplate {
-  questions: Question[];
+  blocks: Block[];
   recipients: { user: DirectoryUser; runCount: number }[];
 }
 
@@ -187,7 +201,7 @@ export interface OneOnOneRun {
 export interface TakeOneOnOneResponse {
   run: { id: string; status: OneOnOneRunStatus; createdAt: string; submittedAt: string | null };
   template: { id: string; title: string; description: string | null };
-  questions: Question[];
+  blocks: Block[];
   answers: AnswerInput[] | null;
 }
 

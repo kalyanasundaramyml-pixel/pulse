@@ -70,10 +70,12 @@ async function validateAnswers(surveyId: string, answers: AnswerInput[]) {
 export async function getTakeSurvey(surveyId: string, user: User) {
   const survey = await assertIsRecipient(surveyId, user);
 
-  const questions = await prisma.question.findMany({
+  const blocks = await prisma.surveyBlock.findMany({
     where: { surveyId },
     orderBy: { position: 'asc' },
-    include: { options: { orderBy: { position: 'asc' } } },
+    include: {
+      questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
+    },
   });
 
   const myResponse = survey.isAnonymous
@@ -88,14 +90,21 @@ export async function getTakeSurvey(surveyId: string, user: User) {
       isAnonymous: survey.isAnonymous,
       status: survey.status,
     },
-    questions: questions.map((q) => ({
-      id: q.id,
-      questionType: q.questionType,
-      prompt: q.prompt,
-      isRequired: q.isRequired,
-      ratingScaleMin: q.ratingScaleMin,
-      ratingScaleMax: q.ratingScaleMax,
-      options: q.options.map((o) => ({ id: o.id, label: o.label })),
+    blocks: blocks.map((b) => ({
+      id: b.id,
+      blockType: b.blockType,
+      name: b.name,
+      title: b.title,
+      body: b.body,
+      questions: b.questions.map((q) => ({
+        id: q.id,
+        questionType: q.questionType,
+        prompt: q.prompt,
+        isRequired: q.isRequired,
+        ratingScaleMin: q.ratingScaleMin,
+        ratingScaleMax: q.ratingScaleMax,
+        options: q.options.map((o) => ({ id: o.id, label: o.label })),
+      })),
     })),
     alreadyResponded: myResponse != null,
     myResponse: myResponse

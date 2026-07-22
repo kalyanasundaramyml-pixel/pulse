@@ -31,6 +31,17 @@ enum OneOnOneRunStatus {
   COMPLETED
 }
 
+enum BlockType {
+  WELCOME
+  QUESTIONS
+  END
+}
+
+enum OneOnOneStatus {
+  DRAFT
+  PUBLISHED
+}
+
 model User {
   id                  String    @id @default(uuid())
   name                String
@@ -101,6 +112,7 @@ model Survey {
   isPublic     Boolean       @default(false) @map("is_public")
 
   questions           Question[]
+  blocks              SurveyBlock[]
   recipients          SurveyRecipient[]
   anonymousResponses  AnonymousResponse[]
   attributedResponses AttributedResponse[]
@@ -110,10 +122,35 @@ model Survey {
   @@map("surveys")
 }
 
+// A survey is organized into an ordered sequence of blocks: exactly one
+// WELCOME block (first), any number of named QUESTIONS blocks in the
+// middle (independently reorderable, each holding its own questions), and
+// exactly one END block (last). Welcome/End carry editable title+body
+// content and never hold questions.
+model SurveyBlock {
+  id        String    @id @default(uuid())
+  surveyId  String    @map("survey_id")
+  survey    Survey    @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  position  Int
+  blockType BlockType @map("block_type")
+  name      String?
+  title     String?
+  body      String?
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  questions Question[]
+
+  @@unique([surveyId, position])
+  @@map("survey_blocks")
+}
+
 model Question {
   id              String       @id @default(uuid())
   surveyId        String       @map("survey_id")
   survey          Survey       @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  blockId         String       @map("block_id")
+  block           SurveyBlock  @relation(fields: [blockId], references: [id], onDelete: Cascade)
   position        Int
   questionType    QuestionType @map("question_type")
   prompt          String
@@ -127,7 +164,7 @@ model Question {
   anonymousAnswers       AnonymousAnswer[]
   attributedAnswers      AttributedAnswer[]
 
-  @@unique([surveyId, position])
+  @@unique([blockId, position])
   @@map("questions")
 }
 
@@ -313,27 +350,54 @@ model AuditLog {
 // ever) that must not touch Survey's anonymity/one-response guarantees. =====
 
 model OneOnOneTemplate {
-  id          String   @id @default(uuid())
+  id          String         @id @default(uuid())
   title       String
   description String?
-  createdById String   @map("created_by")
-  createdBy   User     @relation(fields: [createdById], references: [id])
-  isArchived  Boolean  @default(false) @map("is_archived")
-  isPublic    Boolean  @default(false) @map("is_public")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdById String         @map("created_by")
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  isArchived  Boolean        @default(false) @map("is_archived")
+  isPublic    Boolean        @default(false) @map("is_public")
+  // isTemplate:true = a reusable template (never runs directly). false = a
+  // live one-on-one "initiated" from a template via duplicate, which goes
+  // through its own DRAFT->PUBLISHED lifecycle before runs can start.
+  isTemplate  Boolean        @default(true) @map("is_template")
+  status      OneOnOneStatus @default(DRAFT)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
 
   questions  OneOnOneQuestion[]
+  blocks     OneOnOneBlock[]
   recipients OneOnOneRecipient[]
   runs       OneOnOneRun[]
 
   @@map("one_on_one_templates")
 }
 
+// Same block structure as SurveyBlock, scoped to a OneOnOneTemplate instead.
+model OneOnOneBlock {
+  id         String    @id @default(uuid())
+  templateId String    @map("template_id")
+  template   OneOnOneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  position   Int
+  blockType  BlockType @map("block_type")
+  name       String?
+  title      String?
+  body       String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  questions OneOnOneQuestion[]
+
+  @@unique([templateId, position])
+  @@map("one_on_one_blocks")
+}
+
 model OneOnOneQuestion {
   id             String       @id @default(uuid())
   templateId     String       @map("template_id")
   template       OneOnOneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  blockId        String       @map("block_id")
+  block          OneOnOneBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
   position       Int
   questionType   QuestionType @map("question_type")
   prompt         String
@@ -346,7 +410,7 @@ model OneOnOneQuestion {
   options OneOnOneQuestionOption[]
   answers OneOnOneAnswer[]
 
-  @@unique([templateId, position])
+  @@unique([blockId, position])
   @@map("one_on_one_questions")
 }
 

@@ -63,6 +63,9 @@ export function OneOnOneTakePage() {
   if (!data) return null;
 
   const isCompleted = submitted || data.run.status === 'COMPLETED';
+  const welcome = data.blocks.find((b) => b.blockType === 'WELCOME');
+  const end = data.blocks.find((b) => b.blockType === 'END');
+  const questionBlocks = data.blocks.filter((b) => b.blockType === 'QUESTIONS');
 
   return (
     <div className="page survey-take-page">
@@ -70,66 +73,85 @@ export function OneOnOneTakePage() {
       {data.template.description && <p>{data.template.description}</p>}
       <p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>
 
+      {welcome && (welcome.title || welcome.body) && (
+        <div className="take-block-intro">
+          {welcome.title && <h2>{welcome.title}</h2>}
+          {welcome.body && <p>{welcome.body}</p>}
+        </div>
+      )}
+
       {isCompleted ? (
         <>
           <p className="form-success">
             Submitted{data.run.submittedAt ? ` on ${new Date(data.run.submittedAt).toLocaleDateString()}` : ''}. This
             1:1 is complete and can't be changed.
           </p>
-          <div className="question-form">
-            {data.questions.map((q) => (
-              <div className="question-block" key={q.id}>
-                <label>{q.prompt}</label>
-                <p>{formatAnswer(q, data.answers?.find((a) => a.questionId === q.id) ?? answers[q.id])}</p>
-              </div>
-            ))}
-          </div>
+          {questionBlocks.map((block) => (
+            <div className="question-form" key={block.id}>
+              {block.name && <h2 className="take-block-heading">{block.name}</h2>}
+              {block.questions.map((q) => (
+                <div className="question-block" key={q.id}>
+                  <label>{q.prompt}</label>
+                  <p>{formatAnswer(q, data.answers?.find((a) => a.questionId === q.id) ?? answers[q.id])}</p>
+                </div>
+              ))}
+            </div>
+          ))}
         </>
       ) : (
         <>
-          <div className="question-form">
-            {data.questions.map((q) => (
-              <div className="question-block" key={q.id}>
-                <label>
-                  {q.prompt} {q.isRequired && <span className="required">*</span>}
-                </label>
-                {q.questionType === 'RATING' && (
-                  <>
-                    <RatingInput
-                      min={q.ratingScaleMin ?? 1}
-                      max={q.ratingScaleMax ?? 5}
-                      value={answers[q.id]?.ratingValue}
-                      onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+          {questionBlocks.map((block) => (
+            <div className="question-form" key={block.id}>
+              {block.name && <h2 className="take-block-heading">{block.name}</h2>}
+              {block.questions.map((q) => (
+                <div className="question-block" key={q.id}>
+                  <label>
+                    {q.prompt} {q.isRequired && <span className="required">*</span>}
+                  </label>
+                  {q.questionType === 'RATING' && (
+                    <>
+                      <RatingInput
+                        min={q.ratingScaleMin ?? 1}
+                        max={q.ratingScaleMax ?? 5}
+                        value={answers[q.id]?.ratingValue}
+                        onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+                      />
+                      <CommentField
+                        value={answers[q.id]?.commentText ?? ''}
+                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                      />
+                    </>
+                  )}
+                  {q.questionType === 'TEXT' && (
+                    <TextInput
+                      value={answers[q.id]?.textValue ?? ''}
+                      onChange={(value) => updateAnswer(q.id, { textValue: value })}
                     />
-                    <CommentField
-                      value={answers[q.id]?.commentText ?? ''}
-                      onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                    />
-                  </>
-                )}
-                {q.questionType === 'TEXT' && (
-                  <TextInput
-                    value={answers[q.id]?.textValue ?? ''}
-                    onChange={(value) => updateAnswer(q.id, { textValue: value })}
-                  />
-                )}
-                {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
-                  <>
-                    <ChoiceInput
-                      options={q.options}
-                      multi={q.questionType === 'MULTI_CHOICE'}
-                      selected={answers[q.id]?.selectedOptionIds ?? []}
-                      onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
-                    />
-                    <CommentField
-                      value={answers[q.id]?.commentText ?? ''}
-                      onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                    />
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+                  )}
+                  {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
+                    <>
+                      <ChoiceInput
+                        options={q.options}
+                        multi={q.questionType === 'MULTI_CHOICE'}
+                        selected={answers[q.id]?.selectedOptionIds ?? []}
+                        onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
+                      />
+                      <CommentField
+                        value={answers[q.id]?.commentText ?? ''}
+                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                      />
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+          {end && (end.title || end.body) && (
+            <div className="take-block-intro">
+              {end.title && <h2>{end.title}</h2>}
+              {end.body && <p>{end.body}</p>}
+            </div>
+          )}
           {error && <p className="form-error">{error}</p>}
           <p className="muted">You can only submit this once, so double-check your answers before submitting.</p>
           <button onClick={handleSubmit} disabled={submitting} className="primary">

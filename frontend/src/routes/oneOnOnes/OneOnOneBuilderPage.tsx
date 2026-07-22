@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { oneOnOnesApi } from '../../api/oneOnOnes';
-import { QuestionInput } from '../../api/surveys';
-import { OneOnOneTemplateDetail, Question } from '../../types/api';
+import { OneOnOneTemplateDetail } from '../../types/api';
 import { ApiError } from '../../api/client';
-import { QuestionEditor } from '../../components/surveys/QuestionEditor';
+import { BlockApi, BlockList } from '../../components/surveys/BlockList';
+import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPanel';
 import { useAuth } from '../../hooks/useAuth';
 
 export function OneOnOneBuilderPage() {
@@ -19,9 +19,19 @@ export function OneOnOneBuilderPage() {
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [startingRunFor, setStartingRunFor] = useState<string | null>(null);
   const [runStartedFor, setRunStartedFor] = useState<string | null>(null);
+
+  const blockApi: BlockApi = {
+    addBlock: (name) => oneOnOnesApi.addBlock(id!, name),
+    updateBlock: (blockId, input) => oneOnOnesApi.updateBlock(id!, blockId, input),
+    deleteBlock: (blockId) => oneOnOnesApi.deleteBlock(id!, blockId),
+    reorderBlocks: (blockIds) => oneOnOnesApi.reorderBlocks(id!, blockIds),
+    addQuestion: (blockId, input) => oneOnOnesApi.addQuestion(id!, blockId, input),
+    updateQuestion: (blockId, questionId, input) => oneOnOnesApi.updateQuestion(id!, blockId, questionId, input),
+    deleteQuestion: (blockId, questionId) => oneOnOnesApi.deleteQuestion(id!, blockId, questionId),
+    reorderQuestions: (blockId, questionIds) => oneOnOnesApi.reorderQuestions(id!, blockId, questionIds),
+  };
 
   async function loadTemplate(templateId: string) {
     setLoading(true);
@@ -30,7 +40,6 @@ export function OneOnOneBuilderPage() {
       setTemplate(res.template);
       setTitle(res.template.title);
       setDescription(res.template.description ?? '');
-      setEditingQuestion(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load template');
     } finally {
@@ -57,8 +66,8 @@ export function OneOnOneBuilderPage() {
     }
   }
 
-  async function handleSaveDetails(e: FormEvent) {
-    e.preventDefault();
+  async function handleSaveDetails(e?: FormEvent) {
+    e?.preventDefault();
     if (!id) return;
     setError(null);
     setSubmitting(true);
@@ -98,33 +107,43 @@ export function OneOnOneBuilderPage() {
     if (!id) return;
     setError(null);
     try {
-      const res = await oneOnOnesApi.duplicateTemplate(id);
+      const res = await oneOnOnesApi.duplicateTemplate(id, true);
       navigate(`/one-on-ones/${res.template.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
     }
   }
 
-  async function handleAddQuestion(input: QuestionInput) {
-    if (!id) return;
-    await oneOnOnesApi.addQuestion(id, input);
-    await loadTemplate(id);
-  }
-
-  async function handleUpdateQuestion(input: QuestionInput) {
-    if (!id || !editingQuestion) return;
-    await oneOnOnesApi.updateQuestion(id, editingQuestion.id, input);
-    await loadTemplate(id);
-  }
-
-  async function handleDeleteQuestion(questionId: string) {
+  async function handleInitiate() {
     if (!id) return;
     setError(null);
     try {
-      await oneOnOnesApi.deleteQuestion(id, questionId);
+      const res = await oneOnOnesApi.duplicateTemplate(id, false);
+      navigate(`/one-on-ones/${res.template.id}/edit`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to initiate a one-on-one from this template');
+    }
+  }
+
+  async function handlePublish() {
+    if (!id) return;
+    setError(null);
+    try {
+      await oneOnOnesApi.publish(id);
       await loadTemplate(id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete question');
+      setError(err instanceof ApiError ? err.message : 'Failed to publish');
+    }
+  }
+
+  async function handleUnpublish() {
+    if (!id) return;
+    setError(null);
+    try {
+      await oneOnOnesApi.unpublish(id);
+      await loadTemplate(id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to unpublish');
     }
   }
 
@@ -173,104 +192,133 @@ export function OneOnOneBuilderPage() {
 
   if (!isOwner) {
     return (
-      <div className="page">
-        <div className="page-header">
-          <h1>{template.title}</h1>
-          <span className="status-badge public">Public</span>
+      <div className="page builder-layout">
+        <div className="builder-main">
+          <div className="page-header">
+            <h1>{template.title}</h1>
+            <span className="status-badge public">Public</span>
+          </div>
+          {template.description && <p>{template.description}</p>}
+          <p className="muted">Public 1:1 template, read-only. Initiate it directly, or copy it to customize first.</p>
+
+          {error && <p className="form-error">{error}</p>}
+
+          <BlockList blocks={template.blocks} api={blockApi} editable={false} onChanged={() => {}} />
+
+          <section className="survey-actions">
+            <button onClick={handleInitiate} className="primary">
+              Initiate a one-on-one
+            </button>
+            <button onClick={handleCopyToMyTemplates}>Copy to my templates</button>
+          </section>
         </div>
-        {template.description && <p>{template.description}</p>}
-        <p className="muted">Public 1:1 template, read-only. Copy it to add your own recipients and run it.</p>
-
-        {error && <p className="form-error">{error}</p>}
-
-        <section>
-          <h2>Questions ({template.questions.length})</h2>
-          <ul className="question-list">
-            {template.questions.map((q) => (
-              <li key={q.id}>
-                <span className="question-type-tag">{q.questionType}</span>
-                <span>{q.prompt}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="survey-actions">
-          <button onClick={handleCopyToMyTemplates} className="primary">
-            Copy to my templates
-          </button>
-        </section>
+        <BuilderPreviewPanel
+          title={template.title}
+          description={template.description}
+          blocks={template.blocks}
+          topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>}
+          submitLabel="Submit"
+        />
       </div>
     );
   }
 
+  const isEditableDetails = template.isTemplate || template.status === 'DRAFT';
+
   return (
-    <div className="page">
+    <div className="page builder-layout">
+    <div className="builder-main">
       <div className="page-header">
         <h1>{template.title}</h1>
+        {template.isTemplate ? (
+          <>
+            <span className="status-badge template">Template</span>
+            {template.isPublic && <span className="status-badge public">Public</span>}
+          </>
+        ) : (
+          <span className={`status-badge ${template.status.toLowerCase()}`}>{template.status}</span>
+        )}
         {template.isArchived && <span className="status-badge closed">ARCHIVED</span>}
-        {template.isPublic && <span className="status-badge public">Public</span>}
       </div>
 
-      <form className="survey-form" onSubmit={handleSaveDetails}>
-        <label>
-          Title
-          <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-        </label>
-        <label>
-          Description
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-        </label>
-        <div className="survey-actions">
-          <button type="submit" disabled={submitting}>
-            Save details
-          </button>
-          <button type="button" onClick={handleToggleArchive}>
-            {template.isArchived ? 'Unarchive' : 'Archive'}
-          </button>
-          <button type="button" onClick={handleTogglePublic}>
-            {template.isPublic ? 'Make private' : 'Make public'}
-          </button>
+      {isEditableDetails ? (
+        <div className="survey-form">
+          <label>
+            Title
+            <input value={title} onChange={(e) => setTitle(e.target.value)} required />
+          </label>
+          <label>
+            Description
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+          </label>
+          <div className="survey-actions">
+            <button type="button" onClick={handleToggleArchive}>
+              {template.isArchived ? 'Unarchive' : 'Archive'}
+            </button>
+            {template.isTemplate && (
+              <button type="button" onClick={handleTogglePublic}>
+                {template.isPublic ? 'Make private' : 'Make public'}
+              </button>
+            )}
+          </div>
         </div>
-      </form>
+      ) : (
+        <>
+          {template.description && <p>{template.description}</p>}
+          <p className="muted">
+            This one-on-one is published — unpublish it to edit its title, description, questions, or blocks.
+          </p>
+          <div className="survey-actions">
+            <button type="button" onClick={handleToggleArchive}>
+              {template.isArchived ? 'Unarchive' : 'Archive'}
+            </button>
+          </div>
+        </>
+      )}
 
       {error && <p className="form-error">{error}</p>}
 
+      <p className="muted">
+        Questions stay the same across every run so you can compare answers over time. Editing a question that
+        already has responses is limited to protect trend history.
+      </p>
+      <BlockList
+        blocks={template.blocks}
+        api={blockApi}
+        editable={template.status === 'DRAFT'}
+        onChanged={() => loadTemplate(id!)}
+      />
+
       <section>
-        <h2>Questions ({template.questions.length})</h2>
-        <p className="muted">
-          These stay the same across every run so you can compare answers over time. Editing a question that already
-          has responses is limited to protect trend history.
-        </p>
-        <ul className="question-list">
-          {template.questions.map((q) => (
-            <li key={q.id}>
-              <span className="question-type-tag">{q.questionType}</span>
-              <span>{q.prompt}</span>
-              <button onClick={() => setEditingQuestion(q)}>Edit</button>
-              <button onClick={() => handleDeleteQuestion(q.id)}>Delete</button>
-            </li>
-          ))}
-        </ul>
-        {editingQuestion ? (
-          <QuestionEditor
-            key={editingQuestion.id}
-            existingQuestion={editingQuestion}
-            onSubmit={handleUpdateQuestion}
-            onCancel={() => setEditingQuestion(null)}
-          />
+        <h2>Recipients ({template.recipients.length})</h2>
+      </section>
+
+      <section className="survey-actions">
+        <Link to={`/one-on-ones/${id}/recipients`} className="button">
+          Manage recipients
+        </Link>
+        {isEditableDetails && (
+          <button onClick={() => handleSaveDetails()} disabled={submitting}>
+            {submitting ? 'Saving...' : 'Save details'}
+          </button>
+        )}
+        {template.isTemplate ? (
+          <button onClick={handleInitiate} className="primary">
+            Initiate a one-on-one
+          </button>
         ) : (
-          <QuestionEditor onSubmit={handleAddQuestion} />
+          <>
+            {template.status === 'DRAFT' && (
+              <button onClick={handlePublish} className="primary">
+                Publish
+              </button>
+            )}
+            {template.status === 'PUBLISHED' && <button onClick={handleUnpublish}>Unpublish to edit</button>}
+          </>
         )}
       </section>
 
       <section>
-        <div className="page-header">
-          <h2>Recipients ({template.recipients.length})</h2>
-          <Link to={`/one-on-ones/${id}/recipients`} className="button">
-            Manage recipients
-          </Link>
-        </div>
         {template.recipients.length === 0 ? (
           <p className="empty-state">No recipients yet — add the people you run this 1:1 with.</p>
         ) : (
@@ -290,9 +338,14 @@ export function OneOnOneBuilderPage() {
                   </td>
                   <td>{r.runCount}</td>
                   <td className="actions">
-                    <button onClick={() => handleStartRun(r.user.id)} disabled={startingRunFor === r.user.id}>
-                      {startingRunFor === r.user.id ? 'Starting...' : 'Start new 1:1'}
-                    </button>
+                    {!template.isTemplate && template.status === 'PUBLISHED' && (
+                      <button onClick={() => handleStartRun(r.user.id)} disabled={startingRunFor === r.user.id}>
+                        {startingRunFor === r.user.id ? 'Starting...' : 'Start new 1:1'}
+                      </button>
+                    )}
+                    {!template.isTemplate && template.status === 'DRAFT' && (
+                      <span className="muted">Publish to start</span>
+                    )}
                     {r.runCount > 0 && (
                       <Link to={`/one-on-ones/${id}/trend/${r.user.id}`} className="button">
                         View trend
@@ -306,6 +359,14 @@ export function OneOnOneBuilderPage() {
           </table>
         )}
       </section>
+    </div>
+    <BuilderPreviewPanel
+      title={template.title}
+      description={template.description}
+      blocks={template.blocks}
+      topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>}
+      submitLabel="Submit"
+    />
     </div>
   );
 }

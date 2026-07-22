@@ -4,6 +4,9 @@ import {
   createSurveySchema,
   updateSurveySchema,
   listSurveysQuerySchema,
+  createBlockSchema,
+  updateBlockSchema,
+  reorderBlocksSchema,
   createQuestionSchema,
   updateQuestionSchema,
   reorderQuestionsSchema,
@@ -32,10 +35,15 @@ surveysRouter.post('/:id/unpublish', requireRole('LEADER', 'ADMIN'), controller.
 surveysRouter.post('/:id/reopen', requireRole('LEADER', 'ADMIN'), validate(reopenSurveySchema), controller.reopenSurvey);
 surveysRouter.post('/:id/duplicate', requireRole('LEADER', 'ADMIN'), validate(duplicateSurveySchema), controller.duplicateSurvey);
 
-surveysRouter.post('/:id/questions', requireRole('LEADER', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
-surveysRouter.patch('/:id/questions/:qid', requireRole('LEADER', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
-surveysRouter.delete('/:id/questions/:qid', requireRole('LEADER', 'ADMIN'), controller.deleteQuestion);
-surveysRouter.put('/:id/questions/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
+surveysRouter.post('/:id/blocks', requireRole('LEADER', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
+surveysRouter.patch('/:id/blocks/:blockId', requireRole('LEADER', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
+surveysRouter.delete('/:id/blocks/:blockId', requireRole('LEADER', 'ADMIN'), controller.deleteBlock);
+surveysRouter.put('/:id/blocks/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
+
+surveysRouter.post('/:id/blocks/:blockId/questions', requireRole('LEADER', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
+surveysRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('LEADER', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
+surveysRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('LEADER', 'ADMIN'), controller.deleteQuestion);
+surveysRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
 
 surveysRouter.put('/:id/recipients', requireRole('LEADER', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 surveysRouter.post('/:id/recipients', requireRole('LEADER', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);

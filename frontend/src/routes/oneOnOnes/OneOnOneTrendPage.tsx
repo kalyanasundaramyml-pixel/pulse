@@ -44,7 +44,7 @@ export function OneOnOneTrendPage() {
       ) : (
         <section className="question-summaries">
           {trend.questions.map((series) => {
-            const question = template.questions.find((q) => q.id === series.questionId);
+            const question = template.blocks.flatMap((b) => b.questions).find((q) => q.id === series.questionId);
             return (
               <div className="question-summary-card" key={series.questionId}>
                 <h3>{series.prompt}</h3>

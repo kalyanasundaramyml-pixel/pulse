@@ -4,6 +4,9 @@ import {
   createTemplateSchema,
   updateTemplateSchema,
   listTemplatesQuerySchema,
+  createBlockSchema,
+  updateBlockSchema,
+  reorderBlocksSchema,
   createQuestionSchema,
   updateQuestionSchema,
   reorderQuestionsSchema,
@@ -11,6 +14,7 @@ import {
   addRecipientsSchema,
   startRunSchema,
   submitRunSchema,
+  duplicateTemplateSchema,
 } from './oneOnOnes.schemas';
 import { validate } from '../../middleware/validate';
 import { requireAuth } from '../../middleware/requireAuth';
@@ -33,12 +37,19 @@ oneOnOnesRouter.get('/', requireRole('LEADER', 'ADMIN'), validate(listTemplatesQ
 oneOnOnesRouter.get('/:id', requireRole('LEADER', 'ADMIN'), controller.getTemplate);
 oneOnOnesRouter.patch('/:id', requireRole('LEADER', 'ADMIN'), validate(updateTemplateSchema), controller.updateTemplate);
 oneOnOnesRouter.delete('/:id', requireRole('LEADER', 'ADMIN'), controller.deleteTemplate);
-oneOnOnesRouter.post('/:id/duplicate', requireRole('LEADER', 'ADMIN'), controller.duplicateTemplate);
+oneOnOnesRouter.post('/:id/duplicate', requireRole('LEADER', 'ADMIN'), validate(duplicateTemplateSchema), controller.duplicateTemplate);
+oneOnOnesRouter.post('/:id/publish', requireRole('LEADER', 'ADMIN'), controller.publishTemplate);
+oneOnOnesRouter.post('/:id/unpublish', requireRole('LEADER', 'ADMIN'), controller.unpublishTemplate);
 
-oneOnOnesRouter.post('/:id/questions', requireRole('LEADER', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
-oneOnOnesRouter.patch('/:id/questions/:qid', requireRole('LEADER', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
-oneOnOnesRouter.delete('/:id/questions/:qid', requireRole('LEADER', 'ADMIN'), controller.deleteQuestion);
-oneOnOnesRouter.put('/:id/questions/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
+oneOnOnesRouter.post('/:id/blocks', requireRole('LEADER', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
+oneOnOnesRouter.patch('/:id/blocks/:blockId', requireRole('LEADER', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
+oneOnOnesRouter.delete('/:id/blocks/:blockId', requireRole('LEADER', 'ADMIN'), controller.deleteBlock);
+oneOnOnesRouter.put('/:id/blocks/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
+
+oneOnOnesRouter.post('/:id/blocks/:blockId/questions', requireRole('LEADER', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
+oneOnOnesRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('LEADER', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
+oneOnOnesRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('LEADER', 'ADMIN'), controller.deleteQuestion);
+oneOnOnesRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('LEADER', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
 
 oneOnOnesRouter.put('/:id/recipients', requireRole('LEADER', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 oneOnOnesRouter.post('/:id/recipients', requireRole('LEADER', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);

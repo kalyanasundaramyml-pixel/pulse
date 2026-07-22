@@ -33,7 +33,10 @@ describe('anonymous survey response lifecycle', () => {
     expect(createRes.status).toBe(201);
     const surveyId = createRes.body.survey.id;
 
-    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/questions`).send({
+    const surveyDetail = await leaderAgent.get(`/api/surveys/${surveyId}`);
+    const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
+
+    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
       questionType: 'RATING',
       prompt: 'How happy are you?',
       isRequired: true,
@@ -119,7 +122,10 @@ describe('anonymous survey response lifecycle', () => {
     const createRes = await leaderAgent.post('/api/surveys').send({ title: 'Named Feedback', isAnonymous: false });
     const surveyId = createRes.body.survey.id;
 
-    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/questions`).send({
+    const surveyDetail = await leaderAgent.get(`/api/surveys/${surveyId}`);
+    const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
+
+    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
       questionType: 'TEXT',
       prompt: 'Any comments?',
       isRequired: false,

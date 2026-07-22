@@ -1,4 +1,4 @@
-import { QuestionType, Survey, User } from '@prisma/client';
+import { Survey, SurveyBlock, QuestionType, User } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { assertSurveyOwnerOrAdmin, assertCanViewOrUseTemplate, getSurveyOr404 } from './surveyAuth';
@@ -22,6 +22,13 @@ export async function createSurvey(
       endDate: input.endDate ? new Date(input.endDate) : undefined,
       isTemplate: input.isTemplate ?? false,
       createdById: user.id,
+      blocks: {
+        create: [
+          { position: 0, blockType: 'WELCOME', title: 'Welcome' },
+          { position: 1, blockType: 'QUESTIONS', name: 'Block 1' },
+          { position: 2, blockType: 'END', title: 'Thank you' },
+        ],
+      },
     },
   });
 }
@@ -67,7 +74,12 @@ export async function getSurveyDetail(surveyId: string, user: User) {
   const survey = await prisma.survey.findUnique({
     where: { id: surveyId },
     include: {
-      questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
+      blocks: {
+        orderBy: { position: 'asc' },
+        include: {
+          questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
+        },
+      },
       recipients: { include: { user: { select: { id: true, name: true, email: true } } } },
       createdBy: { select: { id: true, name: true } },
     },
@@ -108,8 +120,17 @@ export async function updateSurvey(
 
 export async function deleteSurvey(surveyId: string, user: User) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
-  assertDraft(survey);
+  if (user.role !== 'ADMIN') {
+    assertDraft(survey);
+  }
   await prisma.survey.delete({ where: { id: surveyId } });
+  await recordAuditLog({
+    actorId: user.id,
+    action: 'SURVEY_DELETED',
+    targetType: 'Survey',
+    targetId: surveyId,
+    metadata: { title: survey.title, status: survey.status },
+  });
 }
 
 export async function publishSurvey(surveyId: string, user: User) {
@@ -188,11 +209,13 @@ export async function reopenSurvey(surveyId: string, user: User, endDate?: strin
 
 export async function duplicateSurvey(surveyId: string, user: User, asTemplate: boolean) {
   const survey = await assertCanViewOrUseTemplate(surveyId, user);
-  const [questions, recipients] = await Promise.all([
-    prisma.question.findMany({
+  const [blocks, recipients] = await Promise.all([
+    prisma.surveyBlock.findMany({
       where: { surveyId },
       orderBy: { position: 'asc' },
-      include: { options: { orderBy: { position: 'asc' } } },
+      include: {
+        questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
+      },
     }),
     prisma.surveyRecipient.findMany({ where: { surveyId }, select: { userId: true } }),
   ]);
@@ -206,8 +229,30 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
       isPublic: false,
       createdById: user.id,
       recipients: { create: recipients.map((r) => ({ userId: r.userId })) },
-      questions: {
-        create: questions.map((q) => ({
+      blocks: {
+        create: blocks.map((b) => ({
+          position: b.position,
+          blockType: b.blockType,
+          name: b.name,
+          title: b.title,
+          body: b.body,
+        })),
+      },
+    },
+    include: { blocks: true },
+  });
+
+  // Questions are created as a second pass (not nested in the survey.create
+  // above) because each Question needs both the new surveyId and the new
+  // blockId, and the new block ids don't exist until the create above returns.
+  for (const oldBlock of blocks) {
+    const newBlock = duplicate.blocks.find((b) => b.position === oldBlock.position);
+    if (!newBlock) continue;
+    for (const q of oldBlock.questions) {
+      await prisma.question.create({
+        data: {
+          surveyId: duplicate.id,
+          blockId: newBlock.id,
           position: q.position,
           questionType: q.questionType,
           prompt: q.prompt,
@@ -215,10 +260,10 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
           ratingScaleMin: q.ratingScaleMin,
           ratingScaleMax: q.ratingScaleMax,
           options: { create: q.options.map((o) => ({ position: o.position, label: o.label })) },
-        })),
-      },
-    },
-  });
+        },
+      });
+    }
+  }
 
   await recordAuditLog({
     actorId: user.id,
@@ -229,6 +274,96 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
   });
 
   return duplicate;
+}
+
+// ===== Blocks =====
+// A survey is Welcome -> N named QUESTIONS blocks -> End. Welcome/End are
+// created once (in createSurvey/duplicateSurvey) and can never be added,
+// deleted, or reordered — only their title/body text is editable. Only
+// QUESTIONS blocks can be added, renamed, deleted, and reordered among
+// themselves.
+
+async function getBlockOr404(surveyId: string, blockId: string): Promise<SurveyBlock> {
+  const block = await prisma.surveyBlock.findFirst({ where: { id: blockId, surveyId } });
+  if (!block) {
+    throw new NotFoundError('Block not found');
+  }
+  return block;
+}
+
+export async function addBlock(surveyId: string, user: User, name: string) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  assertDraft(survey);
+  const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
+  const endBlock = blocks.find((b) => b.blockType === 'END');
+  if (!endBlock) {
+    throw new NotFoundError('End block not found');
+  }
+  return prisma.$transaction(async (tx) => {
+    await tx.surveyBlock.update({ where: { id: endBlock.id }, data: { position: endBlock.position + 1 } });
+    return tx.surveyBlock.create({
+      data: { surveyId, position: endBlock.position, blockType: 'QUESTIONS', name },
+    });
+  });
+}
+
+export async function updateBlock(
+  surveyId: string,
+  blockId: string,
+  user: User,
+  input: { name?: string; title?: string; body?: string },
+) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  assertDraft(survey);
+  await getBlockOr404(surveyId, blockId);
+  return prisma.surveyBlock.update({
+    where: { id: blockId },
+    data: { name: input.name, title: input.title, body: input.body },
+  });
+}
+
+export async function deleteBlock(surveyId: string, blockId: string, user: User) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  assertDraft(survey);
+  const block = await getBlockOr404(surveyId, blockId);
+  if (block.blockType !== 'QUESTIONS') {
+    throw new ValidationError('The Welcome and End blocks cannot be deleted');
+  }
+  const questions = await prisma.question.findMany({ where: { blockId }, select: { id: true } });
+  for (const q of questions) {
+    const answerCount = await countAnswersForQuestion(survey, q.id);
+    if (answerCount > 0) {
+      throw new ConflictError(
+        'QUESTION_HAS_RESPONSES',
+        'Cannot delete a block containing a question that already has responses.',
+      );
+    }
+  }
+  await prisma.surveyBlock.delete({ where: { id: blockId } });
+}
+
+export async function reorderBlocks(surveyId: string, user: User, blockIds: string[]) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  assertDraft(survey);
+  const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
+  const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
+  const questionBlockIds = new Set(questionBlocks.map((b) => b.id));
+  if (blockIds.length !== questionBlocks.length || !blockIds.every((id) => questionBlockIds.has(id))) {
+    throw new ValidationError('blockIds must match the full set of question blocks on this survey');
+  }
+  const welcome = blocks.find((b) => b.blockType === 'WELCOME');
+  const end = blocks.find((b) => b.blockType === 'END');
+  if (!welcome || !end) {
+    throw new NotFoundError('Welcome/End block not found');
+  }
+  const finalOrder = [welcome.id, ...blockIds, end.id];
+
+  await prisma.$transaction(
+    finalOrder.map((id, idx) => prisma.surveyBlock.update({ where: { id }, data: { position: idx + 1000 } })),
+  );
+  await prisma.$transaction(
+    finalOrder.map((id, idx) => prisma.surveyBlock.update({ where: { id }, data: { position: idx } })),
+  );
 }
 
 // ===== Questions =====
@@ -242,15 +377,20 @@ interface QuestionInput {
   options?: string[];
 }
 
-export async function addQuestion(surveyId: string, user: User, input: QuestionInput) {
+export async function addQuestion(surveyId: string, blockId: string, user: User, input: QuestionInput) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
   assertDraft(survey);
-  const maxPosition = await prisma.question.aggregate({ where: { surveyId }, _max: { position: true } });
+  const block = await getBlockOr404(surveyId, blockId);
+  if (block.blockType !== 'QUESTIONS') {
+    throw new ValidationError('Questions can only be added to a named question block');
+  }
+  const maxPosition = await prisma.question.aggregate({ where: { blockId }, _max: { position: true } });
   const position = (maxPosition._max.position ?? -1) + 1;
 
   return prisma.question.create({
     data: {
       surveyId,
+      blockId,
       position,
       questionType: input.questionType,
       prompt: input.prompt,
@@ -271,10 +411,16 @@ async function countAnswersForQuestion(survey: Survey, questionId: string): Prom
     : prisma.attributedAnswer.count({ where: { questionId } });
 }
 
-export async function updateQuestion(surveyId: string, questionId: string, user: User, input: Partial<QuestionInput>) {
+export async function updateQuestion(
+  surveyId: string,
+  blockId: string,
+  questionId: string,
+  user: User,
+  input: Partial<QuestionInput>,
+) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
   assertDraft(survey);
-  const question = await prisma.question.findFirst({ where: { id: questionId, surveyId } });
+  const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
     throw new NotFoundError('Question not found');
   }
@@ -311,10 +457,10 @@ export async function updateQuestion(surveyId: string, questionId: string, user:
   });
 }
 
-export async function deleteQuestion(surveyId: string, questionId: string, user: User) {
+export async function deleteQuestion(surveyId: string, blockId: string, questionId: string, user: User) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
   assertDraft(survey);
-  const question = await prisma.question.findFirst({ where: { id: questionId, surveyId } });
+  const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
     throw new NotFoundError('Question not found');
   }
@@ -325,13 +471,14 @@ export async function deleteQuestion(surveyId: string, questionId: string, user:
   await prisma.question.delete({ where: { id: questionId } });
 }
 
-export async function reorderQuestions(surveyId: string, user: User, questionIds: string[]) {
+export async function reorderQuestions(surveyId: string, blockId: string, user: User, questionIds: string[]) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
   assertDraft(survey);
-  const existing = await prisma.question.findMany({ where: { surveyId }, select: { id: true } });
+  await getBlockOr404(surveyId, blockId);
+  const existing = await prisma.question.findMany({ where: { blockId }, select: { id: true } });
   const existingIds = new Set(existing.map((q) => q.id));
   if (questionIds.length !== existing.length || !questionIds.every((id) => existingIds.has(id))) {
-    throw new ValidationError('questionIds must match the full set of question ids on this survey');
+    throw new ValidationError('questionIds must match the full set of question ids in this block');
   }
   await prisma.$transaction(
     questionIds.map((id, idx) => prisma.question.update({ where: { id }, data: { position: idx + 1000 } })),

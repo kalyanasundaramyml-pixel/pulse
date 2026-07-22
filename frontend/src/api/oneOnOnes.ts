@@ -1,6 +1,7 @@
 import { apiClient } from './client';
 import {
   AnswerInput,
+  Block,
   OneOnOneRun,
   OneOnOneTemplate,
   OneOnOneTemplateDetail,
@@ -19,14 +20,28 @@ export const oneOnOnesApi = {
   update: (id: string, input: Partial<{ title: string; description: string; isArchived: boolean; isPublic: boolean }>) =>
     apiClient.patch<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}`, input),
   remove: (id: string) => apiClient.delete<void>(`/one-on-ones/${id}`),
-  duplicateTemplate: (id: string) => apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/duplicate`),
+  duplicateTemplate: (id: string, asTemplate = false) =>
+    apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/duplicate`, { asTemplate }),
+  publish: (id: string) => apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/publish`),
+  unpublish: (id: string) => apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/unpublish`),
 
-  addQuestion: (templateId: string, input: QuestionInput) =>
-    apiClient.post<{ question: Question }>(`/one-on-ones/${templateId}/questions`, input),
-  updateQuestion: (templateId: string, questionId: string, input: Partial<QuestionInput>) =>
-    apiClient.patch<{ question: Question }>(`/one-on-ones/${templateId}/questions/${questionId}`, input),
-  deleteQuestion: (templateId: string, questionId: string) =>
-    apiClient.delete<void>(`/one-on-ones/${templateId}/questions/${questionId}`),
+  addBlock: (templateId: string, name: string) =>
+    apiClient.post<{ block: Block }>(`/one-on-ones/${templateId}/blocks`, { name }),
+  updateBlock: (templateId: string, blockId: string, input: { name?: string; title?: string; body?: string }) =>
+    apiClient.patch<{ block: Block }>(`/one-on-ones/${templateId}/blocks/${blockId}`, input),
+  deleteBlock: (templateId: string, blockId: string) =>
+    apiClient.delete<void>(`/one-on-ones/${templateId}/blocks/${blockId}`),
+  reorderBlocks: (templateId: string, blockIds: string[]) =>
+    apiClient.put<void>(`/one-on-ones/${templateId}/blocks/reorder`, { blockIds }),
+
+  addQuestion: (templateId: string, blockId: string, input: QuestionInput) =>
+    apiClient.post<{ question: Question }>(`/one-on-ones/${templateId}/blocks/${blockId}/questions`, input),
+  updateQuestion: (templateId: string, blockId: string, questionId: string, input: Partial<QuestionInput>) =>
+    apiClient.patch<{ question: Question }>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/${questionId}`, input),
+  deleteQuestion: (templateId: string, blockId: string, questionId: string) =>
+    apiClient.delete<void>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/${questionId}`),
+  reorderQuestions: (templateId: string, blockId: string, questionIds: string[]) =>
+    apiClient.put<void>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/reorder`, { questionIds }),
 
   setRecipients: (templateId: string, userIds: string[]) =>
     apiClient.put<void>(`/one-on-ones/${templateId}/recipients`, { userIds }),

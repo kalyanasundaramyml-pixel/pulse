@@ -91,9 +91,45 @@ export const duplicateSurvey: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const addBlock: RequestHandler = async (req, res, next) => {
+  try {
+    const block = await surveysService.addBlock(req.params.id, req.user!, req.body.name);
+    res.status(201).json({ block });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateBlock: RequestHandler = async (req, res, next) => {
+  try {
+    const block = await surveysService.updateBlock(req.params.id, req.params.blockId, req.user!, req.body);
+    res.json({ block });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteBlock: RequestHandler = async (req, res, next) => {
+  try {
+    await surveysService.deleteBlock(req.params.id, req.params.blockId, req.user!);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const reorderBlocks: RequestHandler = async (req, res, next) => {
+  try {
+    await surveysService.reorderBlocks(req.params.id, req.user!, req.body.blockIds);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const addQuestion: RequestHandler = async (req, res, next) => {
   try {
-    const question = await surveysService.addQuestion(req.params.id, req.user!, req.body);
+    const question = await surveysService.addQuestion(req.params.id, req.params.blockId, req.user!, req.body);
     res.status(201).json({ question });
   } catch (err) {
     next(err);
@@ -102,7 +138,13 @@ export const addQuestion: RequestHandler = async (req, res, next) => {
 
 export const updateQuestion: RequestHandler = async (req, res, next) => {
   try {
-    const question = await surveysService.updateQuestion(req.params.id, req.params.qid, req.user!, req.body);
+    const question = await surveysService.updateQuestion(
+      req.params.id,
+      req.params.blockId,
+      req.params.qid,
+      req.user!,
+      req.body,
+    );
     res.json({ question });
   } catch (err) {
     next(err);
@@ -111,7 +153,7 @@ export const updateQuestion: RequestHandler = async (req, res, next) => {
 
 export const deleteQuestion: RequestHandler = async (req, res, next) => {
   try {
-    await surveysService.deleteQuestion(req.params.id, req.params.qid, req.user!);
+    await surveysService.deleteQuestion(req.params.id, req.params.blockId, req.params.qid, req.user!);
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -120,7 +162,7 @@ export const deleteQuestion: RequestHandler = async (req, res, next) => {
 
 export const reorderQuestions: RequestHandler = async (req, res, next) => {
   try {
-    await surveysService.reorderQuestions(req.params.id, req.user!, req.body.questionIds);
+    await surveysService.reorderQuestions(req.params.id, req.params.blockId, req.user!, req.body.questionIds);
     res.status(204).end();
   } catch (err) {
     next(err);

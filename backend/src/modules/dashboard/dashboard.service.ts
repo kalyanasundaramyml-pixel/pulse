@@ -33,7 +33,7 @@ interface Withheld {
 async function buildQuestionSummaries(surveyId: string, isAnonymous: boolean, respondedCount: number) {
   const questions = await prisma.question.findMany({
     where: { surveyId },
-    orderBy: { position: 'asc' },
+    orderBy: [{ block: { position: 'asc' } }, { position: 'asc' }],
     include: { options: { orderBy: { position: 'asc' } } },
   });
 

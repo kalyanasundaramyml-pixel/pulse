@@ -1,9 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { surveysApi, QuestionInput } from '../../api/surveys';
-import { Question, SurveyDetail } from '../../types/api';
+import { surveysApi } from '../../api/surveys';
+import { SurveyDetail } from '../../types/api';
 import { ApiError } from '../../api/client';
-import { QuestionEditor } from '../../components/surveys/QuestionEditor';
+import { BlockApi, BlockList } from '../../components/surveys/BlockList';
+import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPanel';
+import { AnonymityBadge } from '../../components/surveys/AnonymityBadge';
 import { useAuth } from '../../hooks/useAuth';
 
 export function SurveyBuilderPage() {
@@ -21,9 +23,19 @@ export function SurveyBuilderPage() {
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [reopenDate, setReopenDate] = useState('');
   const [showReopenForm, setShowReopenForm] = useState(false);
+
+  const blockApi: BlockApi = {
+    addBlock: (name) => surveysApi.addBlock(id!, name),
+    updateBlock: (blockId, input) => surveysApi.updateBlock(id!, blockId, input),
+    deleteBlock: (blockId) => surveysApi.deleteBlock(id!, blockId),
+    reorderBlocks: (blockIds) => surveysApi.reorderBlocks(id!, blockIds),
+    addQuestion: (blockId, input) => surveysApi.addQuestion(id!, blockId, input),
+    updateQuestion: (blockId, questionId, input) => surveysApi.updateQuestion(id!, blockId, questionId, input),
+    deleteQuestion: (blockId, questionId) => surveysApi.deleteQuestion(id!, blockId, questionId),
+    reorderQuestions: (blockId, questionIds) => surveysApi.reorderQuestions(id!, blockId, questionIds),
+  };
 
   async function loadSurvey(surveyId: string) {
     setLoading(true);
@@ -34,7 +46,6 @@ export function SurveyBuilderPage() {
       setDescription(res.survey.description ?? '');
       setIsAnonymous(res.survey.isAnonymous);
       setEndDate(res.survey.endDate ? res.survey.endDate.slice(0, 10) : '');
-      setEditingQuestion(null);
       setShowReopenForm(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load survey');
@@ -68,8 +79,8 @@ export function SurveyBuilderPage() {
     }
   }
 
-  async function handleSaveDetails(e: FormEvent) {
-    e.preventDefault();
+  async function handleSaveDetails(e?: FormEvent) {
+    e?.preventDefault();
     if (!id) return;
     setError(null);
     setSubmitting(true);
@@ -80,29 +91,6 @@ export function SurveyBuilderPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to save survey');
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function handleAddQuestion(input: QuestionInput) {
-    if (!id) return;
-    await surveysApi.addQuestion(id, input);
-    await loadSurvey(id);
-  }
-
-  async function handleUpdateQuestion(input: QuestionInput) {
-    if (!id || !editingQuestion) return;
-    await surveysApi.updateQuestion(id, editingQuestion.id, input);
-    await loadSurvey(id);
-  }
-
-  async function handleDeleteQuestion(questionId: string) {
-    if (!id) return;
-    setError(null);
-    try {
-      await surveysApi.deleteQuestion(id, questionId);
-      await loadSurvey(id);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete question');
     }
   }
 
@@ -189,6 +177,21 @@ export function SurveyBuilderPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!id || !survey) return;
+    const warning = isDraft
+      ? `Delete this draft ${survey.isTemplate ? 'template' : 'survey'}? This cannot be undone.`
+      : `Delete this ${survey.status.toLowerCase()} survey and all of its responses? This cannot be undone.`;
+    if (!window.confirm(warning)) return;
+    setError(null);
+    try {
+      await surveysApi.remove(id);
+      navigate('/surveys');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete survey');
+    }
+  }
+
   if (isNew) {
     return (
       <div className="page">
@@ -234,43 +237,42 @@ export function SurveyBuilderPage() {
 
   if (survey.isTemplate && !isOwner) {
     return (
-      <div className="page">
-        <div className="page-header">
-          <h1>{survey.title}</h1>
-          <span className="status-badge template">Template</span>
+      <div className="page builder-layout">
+        <div className="builder-main">
+          <div className="page-header">
+            <h1>{survey.title}</h1>
+            <span className="status-badge template">Template</span>
+          </div>
+          <p className="muted">
+            Public template{survey.createdBy ? ` by ${survey.createdBy.name}` : ''} —{' '}
+            {survey.isAnonymous ? 'anonymous' : 'attributed'} questions, read-only.
+          </p>
+          {survey.description && <p>{survey.description}</p>}
+
+          {error && <p className="form-error">{error}</p>}
+
+          <BlockList blocks={survey.blocks} api={blockApi} editable={false} onChanged={() => {}} />
+
+          <section className="survey-actions">
+            <button onClick={handleStartSurvey} className="primary">
+              Start a survey
+            </button>
+            <button onClick={handleCopyToMyTemplates}>Copy to my templates</button>
+          </section>
         </div>
-        <p className="muted">
-          Public template{survey.createdBy ? ` by ${survey.createdBy.name}` : ''} —{' '}
-          {survey.isAnonymous ? 'anonymous' : 'attributed'} questions, read-only.
-        </p>
-        {survey.description && <p>{survey.description}</p>}
-
-        {error && <p className="form-error">{error}</p>}
-
-        <section>
-          <h2>Questions ({survey.questions.length})</h2>
-          <ul className="question-list">
-            {survey.questions.map((q) => (
-              <li key={q.id}>
-                <span className="question-type-tag">{q.questionType}</span>
-                <span>{q.prompt}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="survey-actions">
-          <button onClick={handleStartSurvey} className="primary">
-            Start a survey
-          </button>
-          <button onClick={handleCopyToMyTemplates}>Copy to my templates</button>
-        </section>
+        <BuilderPreviewPanel
+          title={survey.title}
+          description={survey.description}
+          blocks={survey.blocks}
+          topNote={<AnonymityBadge isAnonymous={survey.isAnonymous} />}
+        />
       </div>
     );
   }
 
   return (
-    <div className="page">
+    <div className="page builder-layout">
+    <div className="builder-main">
       <div className="page-header">
         <h1>{survey.title}</h1>
         {survey.isTemplate ? (
@@ -284,7 +286,7 @@ export function SurveyBuilderPage() {
       </div>
 
       {isDraft ? (
-        <form className="survey-form" onSubmit={handleSaveDetails}>
+        <div className="survey-form">
           <label>
             Title
             <input value={title} onChange={(e) => setTitle(e.target.value)} required />
@@ -314,10 +316,7 @@ export function SurveyBuilderPage() {
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </label>
           )}
-          <button type="submit" disabled={submitting}>
-            Save details
-          </button>
-        </form>
+        </div>
       ) : (
         <p className="muted">
           {survey.isAnonymous ? 'Anonymous' : 'Attributed'} survey — locked while {survey.status.toLowerCase()}.
@@ -327,32 +326,7 @@ export function SurveyBuilderPage() {
 
       {error && <p className="form-error">{error}</p>}
 
-      <section>
-        <h2>Questions ({survey.questions.length})</h2>
-        <ul className="question-list">
-          {survey.questions.map((q) => (
-            <li key={q.id}>
-              <span className="question-type-tag">{q.questionType}</span>
-              <span>{q.prompt}</span>
-              {isDraft && (
-                <>
-                  <button onClick={() => setEditingQuestion(q)}>Edit</button>
-                  <button onClick={() => handleDeleteQuestion(q.id)}>Delete</button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-        {isDraft && editingQuestion && (
-          <QuestionEditor
-            key={editingQuestion.id}
-            existingQuestion={editingQuestion}
-            onSubmit={handleUpdateQuestion}
-            onCancel={() => setEditingQuestion(null)}
-          />
-        )}
-        {isDraft && !editingQuestion && <QuestionEditor onSubmit={handleAddQuestion} />}
-      </section>
+      <BlockList blocks={survey.blocks} api={blockApi} editable={isDraft} onChanged={() => loadSurvey(id!)} />
 
       <section>
         <h2>Recipients ({survey.recipients.length})</h2>
@@ -362,6 +336,11 @@ export function SurveyBuilderPage() {
         <Link to={`/surveys/${id}/recipients`} className="button">
           Manage recipients
         </Link>
+        {isDraft && (
+          <button onClick={() => handleSaveDetails()} disabled={submitting}>
+            {submitting ? 'Saving...' : 'Save details'}
+          </button>
+        )}
         {survey.isTemplate ? (
           <>
             <button onClick={handleStartSurvey} className="primary">
@@ -389,6 +368,11 @@ export function SurveyBuilderPage() {
             </Link>
           </>
         )}
+        {(isDraft || user?.role === 'ADMIN') && (
+          <button onClick={handleDelete} className="danger">
+            Delete {survey.isTemplate ? 'template' : 'survey'}
+          </button>
+        )}
       </section>
 
       {showReopenForm && (
@@ -405,6 +389,13 @@ export function SurveyBuilderPage() {
           </div>
         </section>
       )}
+    </div>
+    <BuilderPreviewPanel
+      title={survey.title}
+      description={survey.description}
+      blocks={survey.blocks}
+      topNote={<AnonymityBadge isAnonymous={survey.isAnonymous} />}
+    />
     </div>
   );
 }

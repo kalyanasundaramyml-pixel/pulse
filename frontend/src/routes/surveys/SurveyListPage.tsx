@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 export function SurveyListPage() {
   const { user } = useAuth();
   const [scope, setScope] = useState<'created' | 'targeted' | 'templates'>('targeted');
-  const [statusTab, setStatusTab] = useState<'active' | 'closed'>('active');
+  const [statusTab, setStatusTab] = useState<'draft' | 'active' | 'closed'>('active');
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,12 +29,23 @@ export function SurveyListPage() {
     }
   }, [scope]);
 
+  function changeScope(next: 'created' | 'targeted' | 'templates') {
+    setScope(next);
+    // "Drafts" only exists under "Created by me" — reset if it wouldn't apply.
+    if (next !== 'created' && statusTab === 'draft') setStatusTab('active');
+  }
+
   const visibleSurveys =
     scope === 'templates'
       ? surveys
-      : surveys
-          .filter((s) => !s.isTemplate)
-          .filter((s) => (statusTab === 'closed' ? s.status === 'CLOSED' : s.status !== 'CLOSED'));
+      : scope === 'created'
+        ? surveys
+            .filter((s) => !s.isTemplate)
+            .filter((s) => (statusTab === 'draft' ? 'DRAFT' : statusTab === 'closed' ? 'CLOSED' : 'PUBLISHED') === s.status)
+        : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
+          surveys
+            .filter((s) => s.status !== 'DRAFT')
+            .filter((s) => (statusTab === 'closed' ? s.status === 'CLOSED' : s.status !== 'CLOSED'));
 
   return (
     <div className="page">
@@ -48,21 +59,34 @@ export function SurveyListPage() {
       </div>
       {canCreate && (
         <div className="tabs">
-          <button className={scope === 'targeted' ? 'active' : ''} onClick={() => setScope('targeted')}>
+          <button className={scope === 'targeted' ? 'active' : ''} onClick={() => changeScope('targeted')}>
             Assigned to me
           </button>
-          <button className={scope === 'created' ? 'active' : ''} onClick={() => setScope('created')}>
+          <button className={scope === 'created' ? 'active' : ''} onClick={() => changeScope('created')}>
             Created by me
           </button>
-          <button className={scope === 'templates' ? 'active' : ''} onClick={() => setScope('templates')}>
+          <button className={scope === 'templates' ? 'active' : ''} onClick={() => changeScope('templates')}>
             Templates
           </button>
         </div>
       )}
-      {scope !== 'templates' && (
-        <div className="tabs">
+      {scope === 'created' && (
+        <div className="subtabs">
+          <button className={statusTab === 'draft' ? 'active' : ''} onClick={() => setStatusTab('draft')}>
+            Drafts
+          </button>
           <button className={statusTab === 'active' ? 'active' : ''} onClick={() => setStatusTab('active')}>
             Active
+          </button>
+          <button className={statusTab === 'closed' ? 'active' : ''} onClick={() => setStatusTab('closed')}>
+            Closed
+          </button>
+        </div>
+      )}
+      {scope === 'targeted' && (
+        <div className="subtabs">
+          <button className={statusTab === 'active' ? 'active' : ''} onClick={() => setStatusTab('active')}>
+            In progress
           </button>
           <button className={statusTab === 'closed' ? 'active' : ''} onClick={() => setStatusTab('closed')}>
             Closed
@@ -73,7 +97,7 @@ export function SurveyListPage() {
         <p>Loading...</p>
       ) : visibleSurveys.length === 0 ? (
         <p className="empty-state">
-          {scope === 'templates' ? 'No templates here yet.' : `No ${statusTab} surveys here yet.`}
+          {scope === 'templates' ? 'No templates here yet.' : `No ${statusTab === 'draft' ? 'draft' : statusTab} surveys here yet.`}
         </p>
       ) : (
         <ul className="survey-list">

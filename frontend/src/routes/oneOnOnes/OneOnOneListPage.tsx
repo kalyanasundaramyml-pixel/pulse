@@ -7,9 +7,12 @@ import { ApiError } from '../../api/client';
 
 export function OneOnOneListPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<'assigned' | 'templates'>('assigned');
+  const [tab, setTab] = useState<'assigned' | 'initiated' | 'templates'>('assigned');
+  const [assignedFilter, setAssignedFilter] = useState<'todo' | 'completed'>('todo');
+  const [initiatedFilter, setInitiatedFilter] = useState<'draft' | 'published'>('draft');
   const [runs, setRuns] = useState<OneOnOneRun[]>([]);
-  const [templates, setTemplates] = useState<OneOnOneTemplate[]>([]);
+  const [mine, setMine] = useState<OneOnOneTemplate[]>([]);
+  const [publicTemplates, setPublicTemplates] = useState<OneOnOneTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,22 +27,36 @@ export function OneOnOneListPage() {
         .finally(() => setLoading(false));
     } else {
       Promise.all([oneOnOnesApi.list('created'), oneOnOnesApi.list('public')])
-        .then(([mine, pub]) => setTemplates([...mine.templates, ...pub.templates]))
+        .then(([mineRes, pubRes]) => {
+          setMine(mineRes.templates);
+          setPublicTemplates(pubRes.templates);
+        })
         .finally(() => setLoading(false));
     }
   }, [tab]);
 
+  async function refetchMine() {
+    const [mineRes, pubRes] = await Promise.all([oneOnOnesApi.list('created'), oneOnOnesApi.list('public')]);
+    setMine(mineRes.templates);
+    setPublicTemplates(pubRes.templates);
+  }
+
   async function handleCopyToMyTemplates(templateId: string) {
     setError(null);
     try {
-      await oneOnOnesApi.duplicateTemplate(templateId);
+      await oneOnOnesApi.duplicateTemplate(templateId, true);
       setTab('templates');
-      const [mine, pub] = await Promise.all([oneOnOnesApi.list('created'), oneOnOnesApi.list('public')]);
-      setTemplates([...mine.templates, ...pub.templates]);
+      await refetchMine();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
     }
   }
+
+  const templates = [...mine.filter((t) => t.isTemplate), ...publicTemplates];
+  const initiated = mine
+    .filter((t) => !t.isTemplate)
+    .filter((t) => (initiatedFilter === 'published' ? t.status === 'PUBLISHED' : t.status === 'DRAFT'));
+  const visibleRuns = runs.filter((r) => (assignedFilter === 'completed' ? r.status === 'COMPLETED' : r.status === 'PENDING'));
 
   return (
     <div className="page">
@@ -56,8 +73,37 @@ export function OneOnOneListPage() {
           <button className={tab === 'assigned' ? 'active' : ''} onClick={() => setTab('assigned')}>
             Assigned to me
           </button>
+          <button className={tab === 'initiated' ? 'active' : ''} onClick={() => setTab('initiated')}>
+            Initiated by me
+          </button>
           <button className={tab === 'templates' ? 'active' : ''} onClick={() => setTab('templates')}>
-            My templates
+            Templates
+          </button>
+        </div>
+      )}
+      {tab === 'assigned' && (
+        <div className="subtabs">
+          <button className={assignedFilter === 'todo' ? 'active' : ''} onClick={() => setAssignedFilter('todo')}>
+            To do
+          </button>
+          <button
+            className={assignedFilter === 'completed' ? 'active' : ''}
+            onClick={() => setAssignedFilter('completed')}
+          >
+            Completed
+          </button>
+        </div>
+      )}
+      {tab === 'initiated' && (
+        <div className="subtabs">
+          <button className={initiatedFilter === 'draft' ? 'active' : ''} onClick={() => setInitiatedFilter('draft')}>
+            Drafts
+          </button>
+          <button
+            className={initiatedFilter === 'published' ? 'active' : ''}
+            onClick={() => setInitiatedFilter('published')}
+          >
+            Published
           </button>
         </div>
       )}
@@ -67,11 +113,11 @@ export function OneOnOneListPage() {
       {loading ? (
         <p>Loading...</p>
       ) : tab === 'assigned' ? (
-        runs.length === 0 ? (
-          <p className="empty-state">No one-on-ones assigned to you yet.</p>
+        visibleRuns.length === 0 ? (
+          <p className="empty-state">No {assignedFilter === 'completed' ? 'completed' : 'to-do'} one-on-ones here yet.</p>
         ) : (
           <ul className="survey-list">
-            {runs.map((r) => (
+            {visibleRuns.map((r) => (
               <li key={r.id}>
                 <Link to={`/one-on-ones/runs/${r.id}/take`}>
                   <span className="survey-title">{r.template?.title}</span>
@@ -79,6 +125,24 @@ export function OneOnOneListPage() {
                     {r.status === 'PENDING' ? 'To do' : 'Completed'}
                   </span>
                   <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : tab === 'initiated' ? (
+        initiated.length === 0 ? (
+          <p className="empty-state">
+            No {initiatedFilter} one-on-ones yet — start one from a template under the Templates tab.
+          </p>
+        ) : (
+          <ul className="survey-list">
+            {initiated.map((t) => (
+              <li key={t.id}>
+                <Link to={`/one-on-ones/${t.id}/edit`}>
+                  <span className="survey-title">{t.title}</span>
+                  <span className={`status-badge ${t.status.toLowerCase()}`}>{t.status}</span>
+                  {t.isArchived && <span className="status-badge closed">ARCHIVED</span>}
                 </Link>
               </li>
             ))}

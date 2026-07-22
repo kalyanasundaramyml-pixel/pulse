@@ -64,6 +64,10 @@ export function SurveyTakePage() {
   if (error && !data) return <p className="form-error">{error}</p>;
   if (!data) return null;
 
+  const welcome = data.blocks.find((b) => b.blockType === 'WELCOME');
+  const end = data.blocks.find((b) => b.blockType === 'END');
+  const questionBlocks = data.blocks.filter((b) => b.blockType === 'QUESTIONS');
+
   return (
     <div className="page survey-take-page">
       <h1>{data.survey.title}</h1>
@@ -79,49 +83,68 @@ export function SurveyTakePage() {
               You already responded to this survey. You can update your answers below and save again.
             </p>
           )}
-          <div className="question-form">
-            {data.questions.map((q) => (
-              <div className="question-block" key={q.id}>
-                <label>
-                  {q.prompt} {q.isRequired && <span className="required">*</span>}
-                </label>
-                {q.questionType === 'RATING' && (
-                  <>
-                    <RatingInput
-                      min={q.ratingScaleMin ?? 1}
-                      max={q.ratingScaleMax ?? 5}
-                      value={answers[q.id]?.ratingValue}
-                      onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+
+          {welcome && (welcome.title || welcome.body) && (
+            <div className="take-block-intro">
+              {welcome.title && <h2>{welcome.title}</h2>}
+              {welcome.body && <p>{welcome.body}</p>}
+            </div>
+          )}
+
+          {questionBlocks.map((block) => (
+            <div className="question-form" key={block.id}>
+              {block.name && <h2 className="take-block-heading">{block.name}</h2>}
+              {block.questions.map((q) => (
+                <div className="question-block" key={q.id}>
+                  <label>
+                    {q.prompt} {q.isRequired && <span className="required">*</span>}
+                  </label>
+                  {q.questionType === 'RATING' && (
+                    <>
+                      <RatingInput
+                        min={q.ratingScaleMin ?? 1}
+                        max={q.ratingScaleMax ?? 5}
+                        value={answers[q.id]?.ratingValue}
+                        onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+                      />
+                      <CommentField
+                        value={answers[q.id]?.commentText ?? ''}
+                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                      />
+                    </>
+                  )}
+                  {q.questionType === 'TEXT' && (
+                    <TextInput
+                      value={answers[q.id]?.textValue ?? ''}
+                      onChange={(value) => updateAnswer(q.id, { textValue: value })}
                     />
-                    <CommentField
-                      value={answers[q.id]?.commentText ?? ''}
-                      onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                    />
-                  </>
-                )}
-                {q.questionType === 'TEXT' && (
-                  <TextInput
-                    value={answers[q.id]?.textValue ?? ''}
-                    onChange={(value) => updateAnswer(q.id, { textValue: value })}
-                  />
-                )}
-                {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
-                  <>
-                    <ChoiceInput
-                      options={q.options}
-                      multi={q.questionType === 'MULTI_CHOICE'}
-                      selected={answers[q.id]?.selectedOptionIds ?? []}
-                      onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
-                    />
-                    <CommentField
-                      value={answers[q.id]?.commentText ?? ''}
-                      onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                    />
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+                  )}
+                  {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
+                    <>
+                      <ChoiceInput
+                        options={q.options}
+                        multi={q.questionType === 'MULTI_CHOICE'}
+                        selected={answers[q.id]?.selectedOptionIds ?? []}
+                        onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
+                      />
+                      <CommentField
+                        value={answers[q.id]?.commentText ?? ''}
+                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                      />
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {end && (end.title || end.body) && (
+            <div className="take-block-intro">
+              {end.title && <h2>{end.title}</h2>}
+              {end.body && <p>{end.body}</p>}
+            </div>
+          )}
+
           {error && <p className="form-error">{error}</p>}
           {successMessage && <p className="form-success">{successMessage}</p>}
           <button onClick={handleSubmit} disabled={submitting} className="primary">

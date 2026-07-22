@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Question, QuestionType, Survey, SurveyDetail, SurveyStatus } from '../types/api';
+import { Block, Question, QuestionType, Survey, SurveyDetail, SurveyStatus } from '../types/api';
 
 export interface QuestionInput {
   questionType: QuestionType;
@@ -37,14 +37,23 @@ export const surveysApi = {
   duplicate: (id: string, asTemplate = false) =>
     apiClient.post<{ survey: Survey }>(`/surveys/${id}/duplicate`, { asTemplate }),
 
-  addQuestion: (surveyId: string, input: QuestionInput) =>
-    apiClient.post<{ question: Question }>(`/surveys/${surveyId}/questions`, input),
-  updateQuestion: (surveyId: string, questionId: string, input: Partial<QuestionInput>) =>
-    apiClient.patch<{ question: Question }>(`/surveys/${surveyId}/questions/${questionId}`, input),
-  deleteQuestion: (surveyId: string, questionId: string) =>
-    apiClient.delete<void>(`/surveys/${surveyId}/questions/${questionId}`),
-  reorderQuestions: (surveyId: string, questionIds: string[]) =>
-    apiClient.put<void>(`/surveys/${surveyId}/questions/reorder`, { questionIds }),
+  addBlock: (surveyId: string, name: string) =>
+    apiClient.post<{ block: Block }>(`/surveys/${surveyId}/blocks`, { name }),
+  updateBlock: (surveyId: string, blockId: string, input: { name?: string; title?: string; body?: string }) =>
+    apiClient.patch<{ block: Block }>(`/surveys/${surveyId}/blocks/${blockId}`, input),
+  deleteBlock: (surveyId: string, blockId: string) =>
+    apiClient.delete<void>(`/surveys/${surveyId}/blocks/${blockId}`),
+  reorderBlocks: (surveyId: string, blockIds: string[]) =>
+    apiClient.put<void>(`/surveys/${surveyId}/blocks/reorder`, { blockIds }),
+
+  addQuestion: (surveyId: string, blockId: string, input: QuestionInput) =>
+    apiClient.post<{ question: Question }>(`/surveys/${surveyId}/blocks/${blockId}/questions`, input),
+  updateQuestion: (surveyId: string, blockId: string, questionId: string, input: Partial<QuestionInput>) =>
+    apiClient.patch<{ question: Question }>(`/surveys/${surveyId}/blocks/${blockId}/questions/${questionId}`, input),
+  deleteQuestion: (surveyId: string, blockId: string, questionId: string) =>
+    apiClient.delete<void>(`/surveys/${surveyId}/blocks/${blockId}/questions/${questionId}`),
+  reorderQuestions: (surveyId: string, blockId: string, questionIds: string[]) =>
+    apiClient.put<void>(`/surveys/${surveyId}/blocks/${blockId}/questions/reorder`, { questionIds }),
 
   setRecipients: (surveyId: string, userIds: string[]) =>
     apiClient.put<{ protectedUserIds: string[]; message: string } | undefined>(
