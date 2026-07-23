@@ -1,0 +1,6 @@
+# Ensure shell scripts always check out with LF line endings, regardless of
+# the cloning machine's core.autocrlf setting. A CRLF shebang line breaks
+# `exec ./docker-entrypoint.sh` inside the Linux container (Windows clones
+# with autocrlf=true — git's own recommended default — would otherwise
+# silently corrupt these on checkout, crash-looping the api container).
+*.sh text eol=lf
