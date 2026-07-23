@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom';
 import { usersApi } from '../../api/users';
 import { AdminUserRow, UserRole } from '../../types/api';
 import { ApiError } from '../../api/client';
+import { useToast } from '../../components/common/ToastProvider';
 
-const ROLES: UserRole[] = ['ADMIN', 'LEADER', 'USER'];
+const ROLES: UserRole[] = ['ADMIN', 'CREATOR', 'USER'];
 
 export function UserListPage() {
+  const { showToast } = useToast();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -43,17 +45,20 @@ export function UserListPage() {
 
   async function handleRoleChange(id: string, role: UserRole) {
     await usersApi.update(id, { role });
-    load();
+    await load();
+    showToast('Role updated');
   }
 
   async function handleToggleActive(id: string, isActive: boolean) {
     await usersApi.update(id, { isActive: !isActive });
-    load();
+    await load();
+    showToast(isActive ? 'User deactivated' : 'User activated');
   }
 
   async function handleResetPassword(id: string) {
     const result = await usersApi.resetPassword(id);
     setResetInfo({ id, tempPassword: result.tempPassword });
+    showToast('Password reset');
   }
 
   async function handleCreateUser(e: React.FormEvent) {

@@ -1,7 +1,7 @@
 // Sole owner of reads/writes against survey_response_access. This is the ONLY
 // module allowed to import the SurveyResponseAccess model. It exists purely to
 // answer "has this user already responded" and "which response is theirs" for
-// the responding user's own request — never for leader/dashboard queries.
+// the responding user's own request — never for creator/dashboard queries.
 // Enforced by an ESLint no-restricted-imports rule on modules/dashboard/**.
 import { prisma } from '../../db/prisma';
 

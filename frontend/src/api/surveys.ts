@@ -64,4 +64,6 @@ export const surveysApi = {
     apiClient.post<void>(`/surveys/${surveyId}/recipients`, { userIds }),
   removeRecipient: (surveyId: string, userId: string) =>
     apiClient.delete<void>(`/surveys/${surveyId}/recipients/${userId}`),
+  reopenForRecipient: (surveyId: string, userId: string) =>
+    apiClient.post<void>(`/surveys/${surveyId}/recipients/${userId}/reopen`),
 };

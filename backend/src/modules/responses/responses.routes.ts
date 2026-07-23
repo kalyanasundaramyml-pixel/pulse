@@ -11,5 +11,4 @@ responsesRouter.use(requireAuth, requirePasswordChanged);
 
 responsesRouter.get('/:id/take', controller.takeSurvey);
 responsesRouter.post('/:id/responses', validate(submitResponseSchema), controller.submitResponse);
-responsesRouter.patch('/:id/responses/me', validate(submitResponseSchema), controller.editResponse);
 responsesRouter.get('/:id/responses/me', controller.getMyResponse);

@@ -69,6 +69,9 @@ async function validateAnswers(surveyId: string, answers: AnswerInput[]) {
 
 export async function getTakeSurvey(surveyId: string, user: User) {
   const survey = await assertIsRecipient(surveyId, user);
+  const recipient = await prisma.surveyRecipient.findUnique({
+    where: { surveyId_userId: { surveyId, userId: user.id } },
+  });
 
   const blocks = await prisma.surveyBlock.findMany({
     where: { surveyId },
@@ -107,6 +110,10 @@ export async function getTakeSurvey(surveyId: string, user: User) {
       })),
     })),
     alreadyResponded: myResponse != null,
+    // A respondent otherwise can never edit or resubmit once they've
+    // responded — this is only true for the one submission after their
+    // creator has explicitly reopened it for them, and it's consumed on use.
+    canResubmit: recipient?.resubmitAllowed ?? false,
     myResponse: myResponse
       ? {
           answers: myResponse.answers.map((a) => ({
@@ -125,48 +132,33 @@ export async function getTakeSurvey(surveyId: string, user: User) {
 
 export async function submitResponse(surveyId: string, user: User, answers: AnswerInput[]) {
   const survey = await assertIsRecipient(surveyId, user);
-  if (survey.status !== 'PUBLISHED') {
+  const recipient = await prisma.surveyRecipient.findUnique({
+    where: { surveyId_userId: { surveyId, userId: user.id } },
+  });
+  const canResubmit = recipient?.resubmitAllowed ?? false;
+
+  if (survey.status !== 'PUBLISHED' && !canResubmit) {
     throw new ConflictError('SURVEY_NOT_PUBLISHED', 'This survey is not currently accepting responses');
   }
   await validateAnswers(surveyId, answers);
 
-  if (survey.isAnonymous) {
-    const result = await anonymousRepo.createResponse(surveyId, user.id, answers);
-    if (result.alreadyExisted) {
-      throw new ConflictError('ALREADY_RESPONDED', 'You have already responded to this survey. Use PATCH to edit your response.');
-    }
-    return { responseId: result.responseId };
-  }
+  const repo = survey.isAnonymous ? anonymousRepo : attributedRepo;
+  const result = await repo.createResponse(surveyId, user.id, answers);
 
-  const result = await attributedRepo.createResponse(surveyId, user.id, answers);
   if (result.alreadyExisted) {
-    throw new ConflictError('ALREADY_RESPONDED', 'You have already responded to this survey. Use PATCH to edit your response.');
-  }
-  return { responseId: result.responseId };
-}
-
-export async function editResponse(surveyId: string, user: User, answers: AnswerInput[]) {
-  const survey = await assertIsRecipient(surveyId, user);
-  if (survey.status !== 'PUBLISHED') {
-    throw new ConflictError('SURVEY_NOT_PUBLISHED', 'This survey is not currently accepting responses');
-  }
-  await validateAnswers(surveyId, answers);
-
-  if (survey.isAnonymous) {
-    const responseId = await anonymousRepo.findMyResponseId(surveyId, user.id);
-    if (!responseId) {
-      throw new NotFoundError('No existing response to edit. Submit one first with POST.');
+    if (!canResubmit) {
+      throw new ConflictError('ALREADY_RESPONDED', 'You have already responded to this survey and cannot edit your response.');
     }
-    await anonymousRepo.updateResponse(responseId, answers);
-    return { responseId };
+    await repo.updateResponse(result.responseId, answers);
+    // One-time grant — reset immediately so a further resubmission needs a
+    // fresh reopen from the creator.
+    await prisma.surveyRecipient.update({
+      where: { surveyId_userId: { surveyId, userId: user.id } },
+      data: { resubmitAllowed: false },
+    });
   }
 
-  const existing = await attributedRepo.getMyResponseWithAnswers(surveyId, user.id);
-  if (!existing) {
-    throw new NotFoundError('No existing response to edit. Submit one first with POST.');
-  }
-  await attributedRepo.updateResponse(existing.id, answers);
-  return { responseId: existing.id };
+  return { responseId: result.responseId };
 }
 
 export async function getMyResponse(surveyId: string, user: User) {

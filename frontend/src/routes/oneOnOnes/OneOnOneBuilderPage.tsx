@@ -7,11 +7,14 @@ import { BlockApi, BlockList, BlockListHandle } from '../../components/surveys/B
 import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPanel';
 import { useAuth } from '../../hooks/useAuth';
 import { useTemplateNav } from '../../hooks/useTemplateNav';
+import { getOneOnOneListView, oneOnOneListViewLabel } from '../../hooks/listView';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function OneOnOneBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { setIsTemplateActive } = useTemplateNav();
   const [searchParams] = useSearchParams();
   const isNew = !id;
@@ -44,9 +47,21 @@ export function OneOnOneBuilderPage() {
     setLoading(true);
     try {
       const res = await oneOnOnesApi.get(templateId);
+      // Adding a question/block reloads the template to pick up the change,
+      // but that reload must never clobber a title/description edit that's
+      // still sitting in the 800ms autosave debounce window — so each field
+      // only adopts the server value if it wasn't locally edited since the
+      // last load (compared against the *previous* `template`, still in
+      // scope here). A genuinely unsaved edit is left alone; the pending
+      // autosave will land it moments later.
+      const prevTemplate = template;
       setTemplate(res.template);
-      setTitle(res.template.title);
-      setDescription(res.template.description ?? '');
+      setTitle((prevTitle) => (prevTemplate && prevTitle !== prevTemplate.title ? prevTitle : res.template.title));
+      setDescription((prevDescription) =>
+        prevTemplate && prevDescription !== (prevTemplate.description ?? '')
+          ? prevDescription
+          : (res.template.description ?? ''),
+      );
       setBlocksDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load template');
@@ -80,9 +95,9 @@ export function OneOnOneBuilderPage() {
     return () => setIsTemplateActive(false);
   }, [isTemplate, template?.isTemplate, setIsTemplateActive]);
 
-  async function handleSaveDetails(e?: FormEvent) {
+  async function handleSaveDetails(e?: FormEvent): Promise<boolean> {
     e?.preventDefault();
-    if (!id) return;
+    if (!id) return false;
     setError(null);
     setSubmitting(true);
     try {
@@ -92,8 +107,10 @@ export function OneOnOneBuilderPage() {
       } else {
         await loadTemplate(id);
       }
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save template');
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -103,8 +120,10 @@ export function OneOnOneBuilderPage() {
     if (!id || !template) return;
     setError(null);
     try {
-      await oneOnOnesApi.update(id, { isArchived: !template.isArchived });
+      const nextIsArchived = !template.isArchived;
+      await oneOnOnesApi.update(id, { isArchived: nextIsArchived });
       await loadTemplate(id);
+      showToast(nextIsArchived ? 'Archived' : 'Unarchived');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update template');
     }
@@ -114,8 +133,13 @@ export function OneOnOneBuilderPage() {
     if (!id || !template) return;
     setError(null);
     try {
-      await oneOnOnesApi.update(id, { isPublic: !template.isPublic });
+      // Flush any edit still sitting in the debounce window first — otherwise
+      // the reload below can overwrite it with the stale value still in the DB.
+      await handleSaveDetails();
+      const nextIsPublic = !template.isPublic;
+      await oneOnOnesApi.update(id, { isPublic: nextIsPublic });
       await loadTemplate(id);
+      showToast(nextIsPublic ? 'Made public' : 'Made private');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update sharing setting');
     }
@@ -125,7 +149,9 @@ export function OneOnOneBuilderPage() {
     if (!id) return;
     setError(null);
     try {
+      await handleSaveDetails();
       const res = await oneOnOnesApi.duplicateTemplate(id, true);
+      showToast('Template copied to your templates');
       navigate(`/one-on-ones/${res.template.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
@@ -137,6 +163,7 @@ export function OneOnOneBuilderPage() {
     setTitle(template.title);
     setDescription(template.description ?? '');
     blockListRef.current?.discard();
+    showToast('Changes discarded');
   }
 
   async function handleDelete() {
@@ -146,7 +173,8 @@ export function OneOnOneBuilderPage() {
     setError(null);
     try {
       await oneOnOnesApi.remove(id);
-      navigate('/one-on-ones');
+      showToast(`${template.isTemplate ? 'Template' : 'One-on-one'} deleted`);
+      navigate(template.isTemplate ? '/templates/one-on-ones' : '/one-on-ones');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to delete');
     }
@@ -156,7 +184,9 @@ export function OneOnOneBuilderPage() {
     if (!id) return;
     setError(null);
     try {
+      await handleSaveDetails();
       const res = await oneOnOnesApi.duplicateTemplate(id, false);
+      showToast('One-on-one initiated from template');
       navigate(`/one-on-ones/${res.template.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to initiate a one-on-one from this template');
@@ -167,8 +197,10 @@ export function OneOnOneBuilderPage() {
     if (!id) return;
     setError(null);
     try {
+      await handleSaveDetails();
       await oneOnOnesApi.publish(id);
       await loadTemplate(id);
+      showToast('Published');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to publish');
     }
@@ -180,6 +212,7 @@ export function OneOnOneBuilderPage() {
     try {
       await oneOnOnesApi.unpublish(id);
       await loadTemplate(id);
+      showToast('Unpublished — you can edit it again');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to unpublish');
     }
@@ -194,6 +227,7 @@ export function OneOnOneBuilderPage() {
       await oneOnOnesApi.startRun(id, userId);
       setRunStartedFor(userId);
       await loadTemplate(id);
+      showToast('New 1:1 started');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to start a new 1:1');
     } finally {
@@ -216,10 +250,21 @@ export function OneOnOneBuilderPage() {
   const hasUnsavedChanges =
     title !== template.title || description !== (template.description ?? '') || blocksDirty;
 
+  const backLink = template.isTemplate ? (
+    <Link to="/templates/one-on-ones" className="back-link">
+      ← Back to 1:1 templates
+    </Link>
+  ) : (
+    <Link to="/one-on-ones?tab=initiated" className="back-link">
+      ← Back to {oneOnOneListViewLabel({ ...getOneOnOneListView(), tab: 'initiated' })}
+    </Link>
+  );
+
   if (!isOwner) {
     return (
       <div className="page builder-layout">
         <div className="builder-main">
+          {backLink}
           <div className="page-header">
             <h1>{template.title}</h1>
             <span className="status-badge public">Public</span>
@@ -242,7 +287,7 @@ export function OneOnOneBuilderPage() {
           title={template.title}
           description={template.description}
           blocks={template.blocks}
-          topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>}
+          topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your creator.</p>}
           submitLabel="Submit"
         />
       </div>
@@ -254,6 +299,7 @@ export function OneOnOneBuilderPage() {
   return (
     <div className="page builder-layout">
     <div className="builder-main">
+      {backLink}
       <div className="page-header">
         <h1>{template.title}</h1>
         {template.isTemplate ? (
@@ -277,11 +323,6 @@ export function OneOnOneBuilderPage() {
             Description
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
           </label>
-          <div className="survey-actions">
-            <button type="button" onClick={handleToggleArchive}>
-              {template.isArchived ? 'Unarchive' : 'Archive'}
-            </button>
-          </div>
         </div>
       ) : (
         <>
@@ -289,11 +330,6 @@ export function OneOnOneBuilderPage() {
           <p className="muted">
             This one-on-one is published — unpublish it to edit its title, description, questions, or blocks.
           </p>
-          <div className="survey-actions">
-            <button type="button" onClick={handleToggleArchive}>
-              {template.isArchived ? 'Unarchive' : 'Archive'}
-            </button>
-          </div>
         </>
       )}
 
@@ -323,13 +359,21 @@ export function OneOnOneBuilderPage() {
         </Link>
         {template.isTemplate ? (
           <>
-            <button onClick={() => handleSaveDetails()} disabled={submitting || !hasUnsavedChanges}>
+            <button
+              onClick={async () => {
+                if (await handleSaveDetails()) showToast('Changes saved');
+              }}
+              disabled={submitting || !hasUnsavedChanges}
+            >
               {submitting ? 'Saving...' : 'Save'}
             </button>
             <button onClick={handleDiscardChanges} disabled={!hasUnsavedChanges}>
               Discard changes
             </button>
             <button onClick={handleTogglePublic}>{template.isPublic ? 'Make private' : 'Make public'}</button>
+            <button type="button" onClick={handleToggleArchive}>
+              {template.isArchived ? 'Unarchive' : 'Archive'}
+            </button>
             <button onClick={handleDelete} className="danger">
               Delete template
             </button>
@@ -337,7 +381,12 @@ export function OneOnOneBuilderPage() {
         ) : (
           <>
             {isEditableDetails && (
-              <button onClick={() => handleSaveDetails()} disabled={submitting}>
+              <button
+                onClick={async () => {
+                  if (await handleSaveDetails()) showToast('Changes saved');
+                }}
+                disabled={submitting}
+              >
                 {submitting ? 'Saving...' : 'Save details'}
               </button>
             )}
@@ -347,6 +396,9 @@ export function OneOnOneBuilderPage() {
               </button>
             )}
             {template.status === 'PUBLISHED' && <button onClick={handleUnpublish}>Unpublish to edit</button>}
+            <button type="button" onClick={handleToggleArchive}>
+              {template.isArchived ? 'Unarchive' : 'Archive'}
+            </button>
           </>
         )}
       </section>
@@ -397,7 +449,7 @@ export function OneOnOneBuilderPage() {
       title={template.title}
       description={template.description}
       blocks={template.blocks}
-      topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>}
+      topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your creator.</p>}
       submitLabel="Submit"
     />
     </div>

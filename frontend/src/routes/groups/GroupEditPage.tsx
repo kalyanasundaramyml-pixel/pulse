@@ -4,10 +4,12 @@ import { groupsApi } from '../../api/groups';
 import { DirectoryUser } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function GroupEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [name, setName] = useState('');
   const [members, setMembers] = useState<DirectoryUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,7 @@ export function GroupEditPage() {
     setSaving(true);
     try {
       await groupsApi.update(id, { name, userIds: members.map((m) => m.id) });
+      showToast('Group saved');
       navigate('/groups');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save group');

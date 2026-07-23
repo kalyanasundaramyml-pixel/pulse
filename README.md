@@ -2,11 +2,11 @@
 
 Self-hosted web app for creating anonymous or attributed feedback
 surveys and recurring 1:1 check-ins, targeting a hand-picked list of
-recipients, and viewing results (including 1:1 trends over time) on a leader
+recipients, and viewing results (including 1:1 trends over time) on a creator
 dashboard. See [the implementation plan](.) for the full design rationale
 (anonymity model, schema, API surface, milestones), or
 [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to actually use the app
-as a User, Leader, or Admin.
+as a User, Creator, or Admin.
 
 ## Stack
 
@@ -23,7 +23,7 @@ Anonymous survey responses are stored in tables (`anonymous_responses`,
 `anonymous_answers`, ...) that have **no column referencing a user at all**.
 A separate backend-only table, `survey_response_access`, is the sole mechanism
 used to enforce "one response per user" and to let a user find/edit their own
-response — it is never read by any leader-facing or dashboard code path (this
+response — it is never read by any creator-facing or dashboard code path (this
 is enforced by an ESLint rule, not just convention). Attributed survey
 responses live in a parallel set of tables that do carry the respondent's
 identity. See [backend/src/modules/responses/anonymousResponse.repository.ts](backend/src/modules/responses/anonymousResponse.repository.ts).

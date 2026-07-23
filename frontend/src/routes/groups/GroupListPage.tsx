@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { groupsApi } from '../../api/groups';
 import { GroupSummary } from '../../types/api';
 import { ApiError } from '../../api/client';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function GroupListPage() {
+  const { showToast } = useToast();
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export function GroupListPage() {
       await groupsApi.create({ name: newName.trim(), userIds: [] });
       setNewName('');
       await load();
+      showToast('Group created');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create group');
     } finally {
@@ -49,6 +52,7 @@ export function GroupListPage() {
     try {
       await groupsApi.remove(id);
       await load();
+      showToast('Group deleted');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to delete group');
     }
@@ -60,7 +64,7 @@ export function GroupListPage() {
         <h1>Groups</h1>
       </div>
       <p className="muted">
-        Groups are shared across all leaders — anyone can add a group's members to a survey's recipient list in one
+        Groups are shared across all creators — anyone can add a group's members to a survey's recipient list in one
         click.
       </p>
       <form className="search-bar" onSubmit={handleCreate}>

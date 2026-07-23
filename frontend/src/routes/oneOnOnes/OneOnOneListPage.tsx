@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { oneOnOnesApi } from '../../api/oneOnOnes';
 import { OneOnOneRun, OneOnOneTemplate } from '../../types/api';
 import { useAuth } from '../../hooks/useAuth';
+import { DateSortOption, SortSelect, sortByDate } from '../../components/common/SortSelect';
+import { getOneOnOneListView, setOneOnOneListView } from '../../hooks/listView';
 
 function ChevronDownIcon() {
   return (
@@ -47,14 +49,28 @@ export function OneOnOneListPage() {
   const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
-  const [tab, setTab] = useState<'assigned' | 'initiated'>(initialTab === 'initiated' ? 'initiated' : 'assigned');
-  const [assignedFilter, setAssignedFilter] = useState<'todo' | 'completed'>('todo');
-  const [initiatedFilter, setInitiatedFilter] = useState<'draft' | 'published'>('draft');
+  const initialView = getOneOnOneListView();
+  const [tab, setTab] = useState<'assigned' | 'initiated'>(
+    initialTab === 'initiated' || initialTab === 'assigned' ? initialTab : initialView.tab,
+  );
+  const [assignedFilter, setAssignedFilter] = useState<'todo' | 'completed'>(initialView.assignedFilter);
+  const [initiatedFilter, setInitiatedFilter] = useState<'draft' | 'published'>(initialView.initiatedFilter);
+  const [sort, setSort] = useState<DateSortOption>('createdDesc');
   const [runs, setRuns] = useState<OneOnOneRun[]>([]);
   const [mine, setMine] = useState<OneOnOneTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canManage = user?.role === 'LEADER' || user?.role === 'ADMIN';
+  const canManage = user?.role === 'CREATOR' || user?.role === 'ADMIN';
+
+  // Remembered so returning via the top-nav "One-on-Ones" link (rather than a
+  // contextual back button) restores whatever tab/filter was last open.
+  useEffect(() => {
+    setOneOnOneListView({ tab, assignedFilter, initiatedFilter });
+  }, [tab, assignedFilter, initiatedFilter]);
+
+  useEffect(() => {
+    if (!canManage && tab !== 'assigned') setTab('assigned');
+  }, [canManage, tab]);
 
   useEffect(() => {
     setLoading(true);
@@ -71,10 +87,36 @@ export function OneOnOneListPage() {
     }
   }, [tab]);
 
-  const initiated = mine
-    .filter((t) => !t.isTemplate)
-    .filter((t) => (initiatedFilter === 'published' ? t.status === 'PUBLISHED' : t.status === 'DRAFT'));
-  const visibleRuns = runs.filter((r) => (assignedFilter === 'completed' ? r.status === 'COMPLETED' : r.status === 'PENDING'));
+  const initiated = sortByDate(
+    mine
+      .filter((t) => !t.isTemplate)
+      .filter((t) => (initiatedFilter === 'published' ? t.status === 'PUBLISHED' : t.status === 'DRAFT')),
+    sort,
+  );
+  const visibleRuns = sortByDate(
+    runs.filter((r) => (assignedFilter === 'completed' ? r.status === 'COMPLETED' : r.status === 'PENDING')),
+    sort,
+  );
+
+  // Group by template — a recurring 1:1 shows as one heading with every run
+  // (past and pending) listed underneath, instead of a flat, repeated list.
+  const runGroups: { templateId: string; templateTitle: string; runs: OneOnOneRun[] }[] = [];
+  for (const run of visibleRuns) {
+    const templateId = run.template?.id ?? 'unknown';
+    let group = runGroups.find((g) => g.templateId === templateId);
+    if (!group) {
+      group = { templateId, templateTitle: run.template?.title ?? 'Untitled', runs: [] };
+      runGroups.push(group);
+    }
+    group.runs.push(run);
+  }
+  const completedCountByTemplate = new Map<string, number>();
+  for (const run of runs) {
+    if (run.status === 'COMPLETED') {
+      const templateId = run.template?.id ?? 'unknown';
+      completedCountByTemplate.set(templateId, (completedCountByTemplate.get(templateId) ?? 0) + 1);
+    }
+  }
 
   return (
     <div className="page">
@@ -103,6 +145,7 @@ export function OneOnOneListPage() {
           >
             Completed
           </button>
+          <SortSelect value={sort} onChange={setSort} />
         </div>
       )}
       {tab === 'initiated' && (
@@ -116,28 +159,46 @@ export function OneOnOneListPage() {
           >
             Published
           </button>
+          <SortSelect value={sort} onChange={setSort} />
         </div>
       )}
 
       {loading ? (
         <p>Loading...</p>
       ) : tab === 'assigned' ? (
-        visibleRuns.length === 0 ? (
+        runGroups.length === 0 ? (
           <p className="empty-state">No {assignedFilter === 'completed' ? 'completed' : 'to-do'} one-on-ones here yet.</p>
         ) : (
-          <ul className="survey-list">
-            {visibleRuns.map((r) => (
-              <li key={r.id}>
-                <Link to={`/one-on-ones/runs/${r.id}/take`}>
-                  <span className="survey-title">{r.template?.title}</span>
-                  <span className={`status-badge ${r.status === 'PENDING' ? 'draft' : 'published'}`}>
-                    {r.status === 'PENDING' ? 'To do' : 'Completed'}
-                  </span>
-                  <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
-                </Link>
-              </li>
+          <div className="run-groups">
+            {runGroups.map((group) => (
+              <details className="run-group" key={group.templateId}>
+                <summary className="run-group-header">
+                  <h3>{group.templateTitle}</h3>
+                  {(completedCountByTemplate.get(group.templateId) ?? 0) >= 2 && (
+                    <Link
+                      to={`/one-on-ones/${group.templateId}/trend/${user?.id}`}
+                      className="dashboard-link"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View trend
+                    </Link>
+                  )}
+                </summary>
+                <ul className="survey-list">
+                  {group.runs.map((r) => (
+                    <li key={r.id}>
+                      <Link to={`/one-on-ones/runs/${r.id}/take`}>
+                        <span className={`status-badge ${r.status === 'PENDING' ? 'draft' : 'published'}`}>
+                          {r.status === 'PENDING' ? 'To do' : 'Completed'}
+                        </span>
+                        <span className="muted">{new Date(r.createdAt).toLocaleDateString()}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ))}
-          </ul>
+          </div>
         )
       ) : initiated.length === 0 ? (
         <p className="empty-state">

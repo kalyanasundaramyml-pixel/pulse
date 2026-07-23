@@ -107,7 +107,7 @@ export async function searchDirectory(opts: { search?: string; page: number; pag
 }
 
 export function assertValidRole(role: string): asserts role is UserRole {
-  if (!['ADMIN', 'LEADER', 'USER'].includes(role)) {
+  if (!['ADMIN', 'CREATOR', 'USER'].includes(role)) {
     throw new ValidationError(`Invalid role: ${role}`);
   }
 }

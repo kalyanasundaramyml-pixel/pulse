@@ -5,11 +5,13 @@ import { DirectoryUser } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function OneOnOneRecipientsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const [selected, setSelected] = useState<DirectoryUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,6 +34,7 @@ export function OneOnOneRecipientsPage() {
         id,
         selected.map((u) => u.id),
       );
+      showToast('Recipients saved');
       navigate(`/one-on-ones/${id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save recipients');

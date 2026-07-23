@@ -4,10 +4,12 @@ import { surveysApi } from '../../api/surveys';
 import { DirectoryUser } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function SurveyRecipientsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [selected, setSelected] = useState<DirectoryUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -33,6 +35,7 @@ export function SurveyRecipientsPage() {
         id,
         selected.map((u) => u.id),
       );
+      showToast('Recipients saved');
       if (result?.protectedUserIds?.length) {
         setNotice(result.message);
       } else {

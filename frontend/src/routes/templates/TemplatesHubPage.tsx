@@ -11,11 +11,11 @@ export function TemplatesHubPage() {
       <div className="template-hub-grid">
         <Link to="/templates/surveys" className="template-hub-card">
           <h2>Survey templates</h2>
-          <p className="muted">Browse your saved survey templates and public ones shared by other leaders.</p>
+          <p className="muted">Browse your saved survey templates and public ones shared by other creators.</p>
         </Link>
         <Link to="/templates/one-on-ones" className="template-hub-card">
           <h2>One-on-One templates</h2>
-          <p className="muted">Browse your saved 1:1 templates and public ones shared by other leaders.</p>
+          <p className="muted">Browse your saved 1:1 templates and public ones shared by other creators.</p>
         </Link>
       </div>
     </div>

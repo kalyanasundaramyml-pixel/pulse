@@ -202,3 +202,12 @@ export const removeRecipient: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+
+export const reopenForRecipient: RequestHandler = async (req, res, next) => {
+  try {
+    await surveysService.reopenForRecipient(req.params.id, req.params.userId, req.user!);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};

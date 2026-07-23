@@ -20,23 +20,23 @@ describe('anonymous survey response lifecycle', () => {
   });
 
   it('enforces one response per user, allows editing, and keeps anonymous results structurally unlinkable', async () => {
-    const leader = await createUser('LEADER', 'Leader');
+    const creator = await createUser('CREATOR', 'Creator');
     const emp1 = await createUser('USER', 'Emp');
     const emp2 = await createUser('USER', 'Emp');
     const emp3 = await createUser('USER', 'Emp');
 
-    const leaderAgent = await loginAgent(app, leader.email, leader.password);
+    const creatorAgent = await loginAgent(app, creator.email, creator.password);
 
-    const createRes = await leaderAgent
+    const createRes = await creatorAgent
       .post('/api/surveys')
       .send({ title: 'Team Pulse', isAnonymous: true });
     expect(createRes.status).toBe(201);
     const surveyId = createRes.body.survey.id;
 
-    const surveyDetail = await leaderAgent.get(`/api/surveys/${surveyId}`);
+    const surveyDetail = await creatorAgent.get(`/api/surveys/${surveyId}`);
     const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
 
-    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
+    const questionRes = await creatorAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
       questionType: 'RATING',
       prompt: 'How happy are you?',
       isRequired: true,
@@ -46,12 +46,12 @@ describe('anonymous survey response lifecycle', () => {
     expect(questionRes.status).toBe(201);
     const questionId = questionRes.body.question.id;
 
-    const recipientsRes = await leaderAgent
+    const recipientsRes = await creatorAgent
       .put(`/api/surveys/${surveyId}/recipients`)
       .send({ userIds: [emp1.user.id, emp2.user.id, emp3.user.id] });
     expect(recipientsRes.status).toBe(204);
 
-    const publishRes = await leaderAgent.post(`/api/surveys/${surveyId}/publish`);
+    const publishRes = await creatorAgent.post(`/api/surveys/${surveyId}/publish`);
     expect(publishRes.status).toBe(200);
 
     const emp1Agent = await loginAgent(app, emp1.email, emp1.password);
@@ -90,7 +90,7 @@ describe('anonymous survey response lifecycle', () => {
     expect(accessRows[0].userId).toBe(emp1.user.id);
 
     // Below the withholding threshold (only 1 of 3 recipients responded).
-    const dashboardBelowThreshold = await leaderAgent.get(`/api/surveys/${surveyId}/dashboard`);
+    const dashboardBelowThreshold = await creatorAgent.get(`/api/surveys/${surveyId}/dashboard`);
     expect(dashboardBelowThreshold.status).toBe(200);
     expect(dashboardBelowThreshold.body).not.toHaveProperty('respondents');
     expect(dashboardBelowThreshold.body.questions[0].summary.withheld).toBe(true);
@@ -102,7 +102,7 @@ describe('anonymous survey response lifecycle', () => {
     await emp2Agent.post(`/api/surveys/${surveyId}/responses`).send({ answers: [{ questionId, ratingValue: 3 }] });
     await emp3Agent.post(`/api/surveys/${surveyId}/responses`).send({ answers: [{ questionId, ratingValue: 5 }] });
 
-    const dashboardAtThreshold = await leaderAgent.get(`/api/surveys/${surveyId}/dashboard`);
+    const dashboardAtThreshold = await creatorAgent.get(`/api/surveys/${surveyId}/dashboard`);
     expect(dashboardAtThreshold.status).toBe(200);
     // Structural guarantee: no `respondents` field exists anywhere on an anonymous dashboard response,
     // even for an Admin/creator viewing it — not just hidden by a flag.
@@ -115,25 +115,25 @@ describe('anonymous survey response lifecycle', () => {
   });
 
   it('attributed surveys carry identity on the dashboard and still enforce one response per user', async () => {
-    const leader = await createUser('LEADER', 'Leader');
+    const creator = await createUser('CREATOR', 'Creator');
     const emp1 = await createUser('USER', 'Emp');
 
-    const leaderAgent = await loginAgent(app, leader.email, leader.password);
-    const createRes = await leaderAgent.post('/api/surveys').send({ title: 'Named Feedback', isAnonymous: false });
+    const creatorAgent = await loginAgent(app, creator.email, creator.password);
+    const createRes = await creatorAgent.post('/api/surveys').send({ title: 'Named Feedback', isAnonymous: false });
     const surveyId = createRes.body.survey.id;
 
-    const surveyDetail = await leaderAgent.get(`/api/surveys/${surveyId}`);
+    const surveyDetail = await creatorAgent.get(`/api/surveys/${surveyId}`);
     const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
 
-    const questionRes = await leaderAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
+    const questionRes = await creatorAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
       questionType: 'TEXT',
       prompt: 'Any comments?',
       isRequired: false,
     });
     const questionId = questionRes.body.question.id;
 
-    await leaderAgent.put(`/api/surveys/${surveyId}/recipients`).send({ userIds: [emp1.user.id] });
-    await leaderAgent.post(`/api/surveys/${surveyId}/publish`);
+    await creatorAgent.put(`/api/surveys/${surveyId}/recipients`).send({ userIds: [emp1.user.id] });
+    await creatorAgent.post(`/api/surveys/${surveyId}/publish`);
 
     const emp1Agent = await loginAgent(app, emp1.email, emp1.password);
     const submitRes = await emp1Agent
@@ -146,7 +146,7 @@ describe('anonymous survey response lifecycle', () => {
       .send({ answers: [{ questionId, textValue: 'Second try' }] });
     expect(dupRes.status).toBe(409);
 
-    const dashboard = await leaderAgent.get(`/api/surveys/${surveyId}/dashboard`);
+    const dashboard = await creatorAgent.get(`/api/surveys/${surveyId}/dashboard`);
     expect(dashboard.status).toBe(200);
     expect(dashboard.body.respondents).toHaveLength(1);
     expect(dashboard.body.respondents[0].userId).toBe(emp1.user.id);

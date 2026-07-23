@@ -37,9 +37,10 @@ function App() {
 
           <Route path="/one-on-ones" element={<OneOnOneListPage />} />
           <Route path="/one-on-ones/runs/:runId/take" element={<OneOnOneTakePage />} />
+          <Route path="/one-on-ones/:id/trend/:userId" element={<OneOnOneTrendPage />} />
           <Route path="/help" element={<HelpPage />} />
 
-          <Route element={<ProtectedRoute roles={['LEADER', 'ADMIN']} />}>
+          <Route element={<ProtectedRoute roles={['CREATOR', 'ADMIN']} />}>
             <Route path="/surveys/new" element={<SurveyBuilderPage />} />
             <Route path="/surveys/templates" element={<SurveyTemplateListPage variant="pick" />} />
             <Route path="/surveys/:id/edit" element={<SurveyBuilderPage />} />
@@ -53,7 +54,6 @@ function App() {
             <Route path="/one-on-ones/templates" element={<OneOnOneTemplateListPage variant="pick" />} />
             <Route path="/one-on-ones/:id/edit" element={<OneOnOneBuilderPage />} />
             <Route path="/one-on-ones/:id/recipients" element={<OneOnOneRecipientsPage />} />
-            <Route path="/one-on-ones/:id/trend/:userId" element={<OneOnOneTrendPage />} />
           </Route>
 
           <Route element={<ProtectedRoute roles={['ADMIN']} />}>

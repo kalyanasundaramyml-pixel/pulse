@@ -8,11 +8,14 @@ import { BuilderPreviewPanel } from '../../components/surveys/BuilderPreviewPane
 import { AnonymityBadge } from '../../components/surveys/AnonymityBadge';
 import { useAuth } from '../../hooks/useAuth';
 import { useTemplateNav } from '../../hooks/useTemplateNav';
+import { getSurveyListView, surveyListViewLabel } from '../../hooks/listView';
+import { useToast } from '../../components/common/ToastProvider';
 
 export function SurveyBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { showToast } = useToast();
   const { setIsTemplateActive } = useTemplateNav();
   const [searchParams] = useSearchParams();
   const isNew = !id;
@@ -28,6 +31,7 @@ export function SurveyBuilderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [reopenDate, setReopenDate] = useState('');
   const [showReopenForm, setShowReopenForm] = useState(false);
+  const [reopeningUserId, setReopeningUserId] = useState<string | null>(null);
   const [blocksDirty, setBlocksDirty] = useState(false);
   const createdRef = useRef(false);
   const blockListRef = useRef<BlockListHandle>(null);
@@ -47,11 +51,30 @@ export function SurveyBuilderPage() {
     setLoading(true);
     try {
       const res = await surveysApi.get(surveyId);
+      // Adding a question/block reloads the survey to pick up the change, but
+      // that reload must never clobber a title/description/anonymity/end-date
+      // edit that's still sitting in the 800ms autosave debounce window — so
+      // each field only adopts the server value if it wasn't locally edited
+      // since the last load (compared against the *previous* `survey`, still
+      // in scope here). A genuinely unsaved edit is left alone; the pending
+      // autosave will land it moments later.
+      const prevSurvey = survey;
       setSurvey(res.survey);
-      setTitle(res.survey.title);
-      setDescription(res.survey.description ?? '');
-      setIsAnonymous(res.survey.isAnonymous);
-      setEndDate(res.survey.endDate ? res.survey.endDate.slice(0, 10) : '');
+      setTitle((prevTitle) => (prevSurvey && prevTitle !== prevSurvey.title ? prevTitle : res.survey.title));
+      setDescription((prevDescription) =>
+        prevSurvey && prevDescription !== (prevSurvey.description ?? '') ? prevDescription : (res.survey.description ?? ''),
+      );
+      setIsAnonymous((prevIsAnonymous) =>
+        prevSurvey && prevIsAnonymous !== prevSurvey.isAnonymous ? prevIsAnonymous : res.survey.isAnonymous,
+      );
+      setEndDate((prevEndDate) => {
+        const prevServerEndDate = prevSurvey?.endDate ? prevSurvey.endDate.slice(0, 10) : '';
+        return prevSurvey && prevEndDate !== prevServerEndDate
+          ? prevEndDate
+          : res.survey.endDate
+            ? res.survey.endDate.slice(0, 10)
+            : '';
+      });
       setShowReopenForm(false);
       setBlocksDirty(false);
     } catch (err) {
@@ -108,9 +131,9 @@ export function SurveyBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, isAnonymous, endDate, survey]);
 
-  async function handleSaveDetails(e?: FormEvent) {
+  async function handleSaveDetails(e?: FormEvent): Promise<boolean> {
     e?.preventDefault();
-    if (!id) return;
+    if (!id) return false;
     setError(null);
     setSubmitting(true);
     try {
@@ -120,8 +143,10 @@ export function SurveyBuilderPage() {
       } else {
         await loadSurvey(id);
       }
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save survey');
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -131,8 +156,13 @@ export function SurveyBuilderPage() {
     if (!id) return;
     setError(null);
     try {
+      // Flush any edit still sitting in the debounce window first — publishing
+      // locks the anonymous/attributed choice in permanently, so it must never
+      // fire against a stale value.
+      await handleSaveDetails();
       await surveysApi.publish(id);
       await loadSurvey(id);
+      showToast('Survey published');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to publish survey');
     }
@@ -140,8 +170,14 @@ export function SurveyBuilderPage() {
 
   async function handleClose() {
     if (!id) return;
-    await surveysApi.close(id);
-    await loadSurvey(id);
+    setError(null);
+    try {
+      await surveysApi.close(id);
+      await loadSurvey(id);
+      showToast('Survey closed');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to close survey');
+    }
   }
 
   async function handleUnpublish() {
@@ -150,6 +186,7 @@ export function SurveyBuilderPage() {
     try {
       await surveysApi.unpublish(id);
       await loadSurvey(id);
+      showToast('Unpublished — you can edit it again');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to unpublish survey');
     }
@@ -161,8 +198,24 @@ export function SurveyBuilderPage() {
     try {
       await surveysApi.reopen(id, reopenDate || null);
       await loadSurvey(id);
+      showToast('Survey reopened');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to reopen survey');
+    }
+  }
+
+  async function handleReopenForRecipient(userId: string) {
+    if (!id) return;
+    setError(null);
+    setReopeningUserId(userId);
+    try {
+      await surveysApi.reopenForRecipient(id, userId);
+      await loadSurvey(id);
+      showToast('Reopened for this recipient');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to reopen for this recipient');
+    } finally {
+      setReopeningUserId(null);
     }
   }
 
@@ -170,7 +223,9 @@ export function SurveyBuilderPage() {
     if (!id) return;
     setError(null);
     try {
+      await handleSaveDetails();
       const res = await surveysApi.duplicate(id);
+      showToast('Survey duplicated');
       navigate(`/surveys/${res.survey.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to duplicate survey');
@@ -182,6 +237,7 @@ export function SurveyBuilderPage() {
     setError(null);
     try {
       const res = await surveysApi.duplicate(id, false);
+      showToast('Survey created from template');
       navigate(`/surveys/${res.survey.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to start a survey from this template');
@@ -193,6 +249,7 @@ export function SurveyBuilderPage() {
     setError(null);
     try {
       const res = await surveysApi.duplicate(id, true);
+      showToast('Template copied to your templates');
       navigate(`/surveys/${res.survey.id}/edit`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to copy this template');
@@ -203,8 +260,13 @@ export function SurveyBuilderPage() {
     if (!id || !survey) return;
     setError(null);
     try {
-      await surveysApi.update(id, { isPublic: !survey.isPublic });
+      // Flush any edit still sitting in the debounce window first — otherwise
+      // the reload below can overwrite it with the stale value still in the DB.
+      await handleSaveDetails();
+      const nextIsPublic = !survey.isPublic;
+      await surveysApi.update(id, { isPublic: nextIsPublic });
       await loadSurvey(id);
+      showToast(nextIsPublic ? 'Made public' : 'Made private');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update sharing setting');
     }
@@ -217,6 +279,7 @@ export function SurveyBuilderPage() {
     setIsAnonymous(survey.isAnonymous);
     setEndDate(survey.endDate ? survey.endDate.slice(0, 10) : '');
     blockListRef.current?.discard();
+    showToast('Changes discarded');
   }
 
   async function handleDelete() {
@@ -228,7 +291,8 @@ export function SurveyBuilderPage() {
     setError(null);
     try {
       await surveysApi.remove(id);
-      navigate('/surveys');
+      showToast(`${survey.isTemplate ? 'Template' : 'Survey'} deleted`);
+      navigate(survey.isTemplate ? '/templates/surveys' : '/surveys');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to delete survey');
     }
@@ -255,10 +319,21 @@ export function SurveyBuilderPage() {
     endDate !== (survey.endDate ? survey.endDate.slice(0, 10) : '') ||
     blocksDirty;
 
+  const backLink = survey.isTemplate ? (
+    <Link to="/templates/surveys" className="back-link">
+      ← Back to Survey templates
+    </Link>
+  ) : (
+    <Link to="/surveys" className="back-link">
+      ← Back to {surveyListViewLabel(getSurveyListView())}
+    </Link>
+  );
+
   if (survey.isTemplate && !isOwner) {
     return (
       <div className="page builder-layout">
         <div className="builder-main">
+          {backLink}
           <div className="page-header">
             <h1>{survey.title}</h1>
             <span className="status-badge template">Template</span>
@@ -293,6 +368,7 @@ export function SurveyBuilderPage() {
   return (
     <div className="page builder-layout">
     <div className="builder-main">
+      {backLink}
       <div className="page-header">
         <h1>{survey.title}</h1>
         {survey.isTemplate ? (
@@ -359,6 +435,32 @@ export function SurveyBuilderPage() {
 
       <section>
         <h2>Recipients ({survey.recipients.length})</h2>
+        {!survey.isTemplate && survey.recipients.length > 0 && (
+          <ul className="recipient-status-list">
+            {survey.recipients.map((r) => (
+              <li key={r.user.id}>
+                <span>
+                  {r.user.name} <span className="muted">{r.user.email}</span>
+                </span>
+                {/* Anonymous surveys can never single out one respondent — that
+                    would undercut the anonymity guarantee — so no reopen option here. */}
+                {survey.isAnonymous ? null : r.resubmitAllowed ? (
+                  <span className="status-badge public">Reopened</span>
+                ) : (
+                  !isDraft && (
+                    <button
+                      type="button"
+                      disabled={reopeningUserId === r.user.id}
+                      onClick={() => handleReopenForRecipient(r.user.id)}
+                    >
+                      {reopeningUserId === r.user.id ? 'Reopening...' : 'Reopen'}
+                    </button>
+                  )
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="survey-actions">
@@ -367,7 +469,12 @@ export function SurveyBuilderPage() {
         </Link>
         {survey.isTemplate ? (
           <>
-            <button onClick={() => handleSaveDetails()} disabled={submitting || !hasUnsavedChanges}>
+            <button
+              onClick={async () => {
+                if (await handleSaveDetails()) showToast('Changes saved');
+              }}
+              disabled={submitting || !hasUnsavedChanges}
+            >
               {submitting ? 'Saving...' : 'Save'}
             </button>
             <button onClick={handleDiscardChanges} disabled={!hasUnsavedChanges}>

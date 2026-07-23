@@ -17,7 +17,7 @@ function downloadCsv(result: ImportResult) {
   URL.revokeObjectURL(url);
 }
 
-const SAMPLE_CSV = 'name,email,role\nJane Smith,jane.smith@example.com,USER\nRaj Patel,raj.patel@example.com,LEADER\n';
+const SAMPLE_CSV = 'name,email,role\nJane Smith,jane.smith@example.com,USER\nRaj Patel,raj.patel@example.com,CREATOR\n';
 
 function downloadSampleCsv() {
   const blob = new Blob([SAMPLE_CSV], { type: 'text/csv' });
@@ -61,7 +61,7 @@ export function UserImportPage() {
         <p>CSV format</p>
         <p>
           One header row followed by one row per user: <code>name,email,role</code>. <code>role</code> is optional
-          and defaults to <code>USER</code> when omitted; accepted values are <code>ADMIN</code>, <code>LEADER</code>,
+          and defaults to <code>USER</code> when omitted; accepted values are <code>ADMIN</code>, <code>CREATOR</code>,
           or <code>USER</code> (case-insensitive).
         </p>
         <p>Example:</p>

@@ -1,4 +1,4 @@
-export type UserRole = 'ADMIN' | 'LEADER' | 'USER';
+export type UserRole = 'ADMIN' | 'CREATOR' | 'USER';
 export type SurveyStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED';
 export type OneOnOneStatus = 'DRAFT' | 'PUBLISHED';
 export type QuestionType = 'RATING' | 'TEXT' | 'SINGLE_CHOICE' | 'MULTI_CHOICE';
@@ -78,11 +78,14 @@ export interface Survey {
   isTemplate: boolean;
   isPublic: boolean;
   createdBy?: { id: string; name: string };
+  _count?: { questions: number; recipients: number; responseAccess: number; attributedResponses: number };
+  // Only present for scope='targeted' — whether the current user has already responded.
+  hasResponded?: boolean;
 }
 
 export interface SurveyDetail extends Survey {
   blocks: Block[];
-  recipients: { user: DirectoryUser }[];
+  recipients: { user: DirectoryUser; resubmitAllowed: boolean }[];
 }
 
 export interface AnswerInput {
@@ -103,6 +106,7 @@ export interface TakeSurveyResponse {
   };
   blocks: Block[];
   alreadyResponded: boolean;
+  canResubmit: boolean;
   myResponse: {
     answers: AnswerInput[];
     submittedAt: string;
@@ -227,11 +231,14 @@ export interface TrendQuestionSeries {
   questionId: string;
   prompt: string;
   type: QuestionType;
+  ratingScaleMin?: number | null;
+  ratingScaleMax?: number | null;
   points: TrendRatingPoint[] | TrendChoicePoint[] | TrendTextPoint[];
 }
 
 export interface OneOnOneTrendResponse {
-  template: { id: string };
+  template: { id: string; title: string };
+  recipient: { id: string; name: string };
   runCount: number;
   questions: TrendQuestionSeries[];
 }

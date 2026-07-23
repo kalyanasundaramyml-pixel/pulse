@@ -10,6 +10,6 @@ dashboardRouter.get(
   '/:id/dashboard',
   requireAuth,
   requirePasswordChanged,
-  requireRole('LEADER', 'ADMIN'),
+  requireRole('CREATOR', 'ADMIN'),
   controller.getDashboard,
 );

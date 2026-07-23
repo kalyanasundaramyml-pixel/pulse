@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { surveysApi } from '../../api/surveys';
 import { Survey } from '../../types/api';
 import { useAuth } from '../../hooks/useAuth';
+import { DateSortOption, SortSelect, sortByDate } from '../../components/common/SortSelect';
+import { getSurveyListView, setSurveyListView } from '../../hooks/listView';
 
 function ChevronDownIcon() {
   return (
@@ -45,12 +47,14 @@ function NewSurveyMenu() {
 
 export function SurveyListPage() {
   const { user } = useAuth();
-  const [scope, setScope] = useState<'created' | 'targeted'>('targeted');
-  const [statusTab, setStatusTab] = useState<'draft' | 'active' | 'closed'>('active');
+  const initialView = getSurveyListView();
+  const [scope, setScope] = useState<'created' | 'targeted'>(initialView.scope);
+  const [statusTab, setStatusTab] = useState<'draft' | 'active' | 'completed' | 'closed'>(initialView.statusTab);
+  const [sort, setSort] = useState<DateSortOption>('createdDesc');
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canCreate = user?.role === 'LEADER' || user?.role === 'ADMIN';
+  const canCreate = user?.role === 'CREATOR' || user?.role === 'ADMIN';
 
   useEffect(() => {
     setLoading(true);
@@ -60,21 +64,41 @@ export function SurveyListPage() {
       .finally(() => setLoading(false));
   }, [scope]);
 
+  // Remembered so returning via the top-nav "Surveys" link (rather than a
+  // contextual back button) restores whatever tab was last open.
+  useEffect(() => {
+    setSurveyListView({ scope, statusTab });
+  }, [scope, statusTab]);
+
+  useEffect(() => {
+    if (!canCreate && scope !== 'targeted') setScope('targeted');
+  }, [canCreate, scope]);
+
   function changeScope(next: 'created' | 'targeted') {
     setScope(next);
-    // "Drafts" only exists under "Created by me" — reset if it wouldn't apply.
+    // "Drafts" and "Completed" only exist under one of the two scopes —
+    // reset if the current tab wouldn't apply on the other side.
     if (next !== 'created' && statusTab === 'draft') setStatusTab('active');
+    if (next === 'created' && statusTab === 'completed') setStatusTab('active');
   }
 
-  const visibleSurveys =
+  const visibleSurveys = sortByDate(
     scope === 'created'
       ? surveys
           .filter((s) => !s.isTemplate)
           .filter((s) => (statusTab === 'draft' ? 'DRAFT' : statusTab === 'closed' ? 'CLOSED' : 'PUBLISHED') === s.status)
       : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
+        // Pending/Completed split by the survey's own status vs whether this
+        // user has already responded — Closed always wins regardless of that.
         surveys
           .filter((s) => s.status !== 'DRAFT')
-          .filter((s) => (statusTab === 'closed' ? s.status === 'CLOSED' : s.status !== 'CLOSED'));
+          .filter((s) => {
+            if (statusTab === 'closed') return s.status === 'CLOSED';
+            if (statusTab === 'completed') return s.status !== 'CLOSED' && !!s.hasResponded;
+            return s.status !== 'CLOSED' && !s.hasResponded;
+          }),
+    sort,
+  );
 
   return (
     <div className="page">
@@ -103,40 +127,68 @@ export function SurveyListPage() {
           <button className={statusTab === 'closed' ? 'active' : ''} onClick={() => setStatusTab('closed')}>
             Closed
           </button>
+          <SortSelect value={sort} onChange={setSort} />
         </div>
       )}
       {scope === 'targeted' && (
         <div className="subtabs">
           <button className={statusTab === 'active' ? 'active' : ''} onClick={() => setStatusTab('active')}>
-            In progress
+            Pending
+          </button>
+          <button className={statusTab === 'completed' ? 'active' : ''} onClick={() => setStatusTab('completed')}>
+            Completed
           </button>
           <button className={statusTab === 'closed' ? 'active' : ''} onClick={() => setStatusTab('closed')}>
             Closed
           </button>
+          <SortSelect value={sort} onChange={setSort} />
         </div>
       )}
       {loading ? (
         <p>Loading...</p>
       ) : visibleSurveys.length === 0 ? (
-        <p className="empty-state">No {statusTab === 'draft' ? 'draft' : statusTab} surveys here yet.</p>
+        <p className="empty-state">
+          No {scope === 'targeted' && statusTab === 'active' ? 'pending' : statusTab} surveys here yet.
+        </p>
       ) : (
         <ul className="survey-list">
-          {visibleSurveys.map((s) => (
-            <li key={s.id}>
-              <Link to={scope === 'targeted' ? `/surveys/${s.id}/take` : `/surveys/${s.id}/edit`}>
-                <span className="survey-title">{s.title}</span>
-                <span className={`status-badge ${s.status.toLowerCase()}`}>{s.status}</span>
-                <span className={`anon-tag ${s.isAnonymous ? 'anonymous' : 'attributed'}`}>
-                  {s.isAnonymous ? 'Anonymous' : 'Attributed'}
-                </span>
-              </Link>
-              {scope === 'created' && (
-                <Link to={`/surveys/${s.id}/dashboard`} className="dashboard-link">
-                  Dashboard
+          {visibleSurveys.map((s) => {
+            const completed = s.isAnonymous ? s._count?.responseAccess : s._count?.attributedResponses;
+            return (
+              <li key={s.id} className={scope === 'created' ? 'has-corner-action' : undefined}>
+                <Link to={scope === 'targeted' ? `/surveys/${s.id}/take` : `/surveys/${s.id}/edit`} className="has-meta">
+                  <div className="survey-row">
+                    <span className="survey-title">{s.title}</span>
+                    <span className={`status-badge ${s.status.toLowerCase()}`}>{s.status}</span>
+                    <span className={`anon-tag ${s.isAnonymous ? 'anonymous' : 'attributed'}`}>
+                      {s.isAnonymous ? 'Anonymous' : 'Attributed'}
+                    </span>
+                  </div>
+                  <div className="survey-meta">
+                    <span>Created {new Date(s.createdAt).toLocaleDateString()}</span>
+                    {scope === 'created' ? (
+                      <>
+                        <span>Questions {s._count?.questions ?? 0}</span>
+                        <span>
+                          Participants {completed ?? 0}/{s._count?.recipients ?? 0}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Due date {s.endDate ? new Date(s.endDate).toLocaleDateString() : 'N/A'}</span>
+                        <span>Questions {s._count?.questions ?? 0}</span>
+                      </>
+                    )}
+                  </div>
                 </Link>
-              )}
-            </li>
-          ))}
+                {scope === 'created' && (
+                  <Link to={`/surveys/${s.id}/dashboard`} className="corner-link" title="View dashboard">
+                    Dashboard
+                  </Link>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

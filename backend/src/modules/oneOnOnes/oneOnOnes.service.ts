@@ -14,12 +14,37 @@ function assertDraft(template: OneOnOneTemplate) {
   }
 }
 
+// A creator can never have two 1:1 templates/live one-on-ones (draft or not)
+// with the same title. Auto-generated titles (create, duplicate) get silently
+// disambiguated with a " (2)", " (3)"... suffix; a deliberate rename instead
+// rejects via assertUniqueTemplateTitle so the person picks a different name.
+async function findUniqueTemplateTitle(createdById: string, baseTitle: string): Promise<string> {
+  let candidate = baseTitle;
+  let n = 1;
+  while (await prisma.oneOnOneTemplate.findFirst({ where: { createdById, title: candidate }, select: { id: true } })) {
+    n += 1;
+    candidate = `${baseTitle} (${n})`;
+  }
+  return candidate;
+}
+
+async function assertUniqueTemplateTitle(createdById: string, title: string, excludeId?: string) {
+  const existing = await prisma.oneOnOneTemplate.findFirst({
+    where: { createdById, title, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true },
+  });
+  if (existing) {
+    throw new ConflictError('DUPLICATE_TITLE', `You already have a one-on-one named "${title}".`);
+  }
+}
+
 // ===== Templates =====
 
 export async function createTemplate(user: User, input: { title: string; description?: string; isTemplate?: boolean }) {
+  const title = await findUniqueTemplateTitle(user.id, input.title);
   return prisma.oneOnOneTemplate.create({
     data: {
-      title: input.title,
+      title,
       description: input.description,
       isTemplate: input.isTemplate ?? true,
       createdById: user.id,
@@ -86,6 +111,9 @@ export async function updateTemplate(
   if (input.title !== undefined || input.description !== undefined) {
     assertDraft(template);
   }
+  if (input.title !== undefined && input.title !== template.title) {
+    await assertUniqueTemplateTitle(template.createdById, input.title, templateId);
+  }
   if (input.isPublic && !template.isTemplate) {
     throw new ValidationError('Only templates can be made public');
   }
@@ -146,15 +174,16 @@ export async function duplicateTemplate(templateId: string, user: User, asTempla
   // template (e.g. initiating a live one-on-one from your own pre-populated
   // template). A non-owner forking or initiating from someone else's public
   // template never inherits their recipients — those are a different
-  // leader's own reports, not the copier's.
+  // creator's own reports, not the copier's.
   const isOwner = template.createdById === user.id;
   const recipients = isOwner
     ? await prisma.oneOnOneRecipient.findMany({ where: { templateId }, select: { userId: true } })
     : [];
 
+  const title = await findUniqueTemplateTitle(user.id, `Copy of ${template.title}`);
   const duplicate = await prisma.oneOnOneTemplate.create({
     data: {
-      title: `Copy of ${template.title}`,
+      title,
       description: template.description,
       createdById: user.id,
       isPublic: false,
@@ -471,7 +500,7 @@ export async function removeRecipient(templateId: string, targetUserId: string, 
     });
 }
 
-// ===== Runs (leader side) =====
+// ===== Runs (creator side) =====
 
 export async function startRun(templateId: string, user: User, recipientUserId: string) {
   const template = await assertTemplateOwnerOrAdmin(templateId, user);
@@ -509,7 +538,7 @@ export async function listRuns(templateId: string, user: User, recipientUserId?:
   });
 }
 
-// ===== Trend (leader side) =====
+// ===== Trend (creator side) =====
 
 interface RatingPoint {
   runId: string;
@@ -530,9 +559,22 @@ interface TextPoint {
 }
 
 export async function getTrend(templateId: string, user: User, recipientUserId: string) {
-  await assertTemplateOwnerOrAdmin(templateId, user);
+  const isSelf = recipientUserId === user.id;
+  if (isSelf) {
+    // Recipients may view their own trend across runs without owning the template —
+    // but only if they actually have run history with it, so this can't be used to
+    // browse an arbitrary template's question list.
+    const hasRun = await prisma.oneOnOneRun.findFirst({ where: { templateId, respondentUserId: recipientUserId } });
+    if (!hasRun) {
+      throw new NotFoundError('No one-on-one history found for this template');
+    }
+  } else {
+    await assertTemplateOwnerOrAdmin(templateId, user);
+  }
 
-  const [questions, runs] = await Promise.all([
+  const [template, recipient, questions, runs] = await Promise.all([
+    prisma.oneOnOneTemplate.findUniqueOrThrow({ where: { id: templateId }, select: { title: true } }),
+    prisma.user.findUniqueOrThrow({ where: { id: recipientUserId }, select: { id: true, name: true } }),
     prisma.oneOnOneQuestion.findMany({
       where: { templateId },
       orderBy: [{ block: { position: 'asc' } }, { position: 'asc' }],
@@ -556,7 +598,14 @@ export async function getTrend(templateId: string, user: User, recipientUserId: 
           comment: answer?.commentText ?? null,
         };
       });
-      return { questionId: q.id, prompt: q.prompt, type: q.questionType, points };
+      return {
+        questionId: q.id,
+        prompt: q.prompt,
+        type: q.questionType,
+        ratingScaleMin: q.ratingScaleMin,
+        ratingScaleMax: q.ratingScaleMax,
+        points,
+      };
     }
     if (q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') {
       const optionLabelById = new Map(q.options.map((o) => [o.id, o.label]));
@@ -580,7 +629,8 @@ export async function getTrend(templateId: string, user: User, recipientUserId: 
   });
 
   return {
-    template: { id: templateId },
+    template: { id: templateId, title: template.title },
+    recipient: { id: recipient.id, name: recipient.name },
     runCount: runs.length,
     questions: questionSeries,
   };

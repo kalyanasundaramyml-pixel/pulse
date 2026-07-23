@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 
-type GuideTab = 'user' | 'leader' | 'admin' | 'faq';
+type GuideTab = 'user' | 'creator' | 'admin' | 'faq';
 
 function Section({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
@@ -62,12 +62,12 @@ function UserGuide() {
 
       <Section title="Your One-on-Ones">
         <p>
-          Under <strong>One-on-Ones → Assigned to me</strong>, you'll find any 1:1 check-ins your leader has started
+          Under <strong>One-on-Ones → Assigned to me</strong>, you'll find any 1:1 check-ins your creator has started
           with you, split into <strong>To do</strong> and <strong>Completed</strong>. These are always attributed —
-          they're tied to your name so your leader can follow up with you directly.
+          they're tied to your name so your creator can follow up with you directly.
         </p>
         <p>
-          Each 1:1 "run" is its own round of questions at a point in time. Your leader may start a new one with you
+          Each 1:1 "run" is its own round of questions at a point in time. Your creator may start a new one with you
           periodically (e.g. monthly), and can see how your answers change over time.
         </p>
       </Section>
@@ -75,11 +75,11 @@ function UserGuide() {
   );
 }
 
-function LeaderGuide() {
+function CreatorGuide() {
   return (
     <div className="help-guide">
       <p className="muted">
-        As a Leader, you can create and manage your own surveys and 1:1 templates, and see results for the ones you
+        As a Creator, you can create and manage your own surveys and 1:1 templates, and see results for the ones you
         own.
       </p>
 
@@ -182,7 +182,7 @@ function LeaderGuide() {
         <p>
           To actually use one, go to <strong>Surveys → New survey → Use a template</strong> and click any template —
           this immediately creates your own live draft survey with its questions copied in, ready for you to add
-          recipients and publish. Marking a template <strong>Public</strong> lets other Leaders do the same with
+          recipients and publish. Marking a template <strong>Public</strong> lets other Creators do the same with
           yours; they get their own independent copy and never affect your original.
         </p>
       </Section>
@@ -217,7 +217,7 @@ function LeaderGuide() {
       <Section title="Groups">
         <p>
           A Group is just a saved, named list of people — a shortcut for recipient-picking, not a live link. Create
-          and manage groups under <strong>Groups</strong>; any Leader or Admin can edit or delete any group, since
+          and manage groups under <strong>Groups</strong>; any Creator or Admin can edit or delete any group, since
           they're a shared, org-wide convenience rather than something you personally own. Adding a group to a
           survey or 1:1's recipients copies its current members in as individual recipients — later changes to the
           group don't retroactively affect a survey you've already sent.
@@ -240,7 +240,7 @@ function AdminGuide() {
   return (
     <div className="help-guide">
       <p className="muted">
-        As an Admin, everything in the Leader Guide applies to you too — and you can act on{' '}
+        As an Admin, everything in the Creator Guide applies to you too — and you can act on{' '}
         <strong>anyone's</strong> surveys and templates, not just your own. The tools below are Admin-only.
       </p>
 
@@ -256,7 +256,7 @@ function AdminGuide() {
         <p>
           For adding many people at once, use <strong>Admin → Import CSV</strong>. The file needs a header row with
           columns <code>name</code>, <code>email</code>, and optionally <code>role</code> (values{' '}
-          <code>ADMIN</code>/<code>LEADER</code>/<code>USER</code>, case-insensitive; defaults to <code>USER</code>{' '}
+          <code>ADMIN</code>/<code>CREATOR</code>/<code>USER</code>, case-insensitive; defaults to <code>USER</code>{' '}
           if left blank). A sample file is available to download from that page. Limits: 2,000 rows and 2MB per
           file.
         </p>
@@ -271,7 +271,7 @@ function AdminGuide() {
       <Section title="Managing users">
         <p>From the Admin user list you can, for any account:</p>
         <ul>
-          <li>Change their role (User / Leader / Admin) directly from the table.</li>
+          <li>Change their role (User / Creator / Admin) directly from the table.</li>
           <li>
             <strong>Deactivate</strong> or <strong>Activate</strong> them — a deactivated account can't sign in at
             all. There's no way to permanently delete a user account; deactivating is the way to disable someone who
@@ -287,7 +287,7 @@ function AdminGuide() {
       <Section title="Managing everyone's surveys and templates">
         <p>
           Because you're treated as an owner of every survey and template, you can open, edit, and manage anyone's
-          work the same way they would. The one meaningful difference from a Leader: you can delete a survey in any
+          work the same way they would. The one meaningful difference from a Creator: you can delete a survey in any
           status (Draft, Published, or Closed), not just while it's still a Draft — useful for cleaning up something
           that should never have been sent. 1:1 templates that already have run history remain undeletable
           regardless of role; archive is still the only option there.
@@ -316,7 +316,7 @@ function Faq() {
           trace an anonymous answer back to a person.
         </p>
       </FaqItem>
-      <FaqItem q="Why can't I see any results for my anonymous survey yet?">
+      <FaqItem q="I am a Creator. Why can't I see any results for my anonymous survey yet?">
         <p>
           Results for an anonymous survey are withheld until at least 3 people have responded, so no answer can be
           singled out or guessed at from a very small sample. This threshold can't be lowered or bypassed by anyone.
@@ -337,7 +337,7 @@ function Faq() {
       </FaqItem>
       <FaqItem q="Can I delete a survey once it's published?">
         <p>
-          As a Leader, no — you can only delete a survey while it's a Draft. Unpublish it back to Draft first if you
+          As a Creator, no — you can only delete a survey while it's a Draft. Unpublish it back to Draft first if you
           need to remove it. Admins can delete a survey in any status.
         </p>
       </FaqItem>
@@ -351,7 +351,7 @@ function Faq() {
           original template, never affects the other.
         </p>
       </FaqItem>
-      <FaqItem q="If I make my template public, can other Leaders edit my original?">
+      <FaqItem q="If I make my template public, can other Creators edit my original?">
         <p>
           No. A public template can only be viewed and copied by others — copying always creates their own
           independent version. Only you (or an Admin) can edit the original.
@@ -359,7 +359,7 @@ function Faq() {
       </FaqItem>
       <FaqItem q="What is a Group, and how is it different from a survey's recipient list?">
         <p>
-          A Group is just a saved, reusable list of people for quickly adding recipients — any Leader or Admin can
+          A Group is just a saved, reusable list of people for quickly adding recipients — any Creator or Admin can
           create, edit, or delete any group. Adding a group to a survey copies its current members in as individual
           recipients at that moment; it isn't a live link, so changing the group later doesn't change who's already
           on a survey you sent.
@@ -399,10 +399,10 @@ function Faq() {
           afterward.
         </p>
       </FaqItem>
-      <FaqItem q="Can a Leader see another Leader's private (non-public) surveys or templates?">
+      <FaqItem q="Can a Creator see another Creator's private (non-public) surveys or templates?">
         <p>
           No — only the owner and Admins can see or manage a private survey or template. Marking something Public
-          only ever grants other Leaders read access and the ability to copy it, never edit access to the original.
+          only ever grants other Creators read access and the ability to copy it, never edit access to the original.
         </p>
       </FaqItem>
       <FaqItem q="What does 'Discard changes' do on a template?">
@@ -417,7 +417,7 @@ function Faq() {
 
 export function HelpPage() {
   const { user } = useAuth();
-  const defaultTab: GuideTab = user?.role === 'ADMIN' ? 'admin' : user?.role === 'LEADER' ? 'leader' : 'user';
+  const defaultTab: GuideTab = user?.role === 'ADMIN' ? 'admin' : user?.role === 'CREATOR' ? 'creator' : 'user';
   const [tab, setTab] = useState<GuideTab>(defaultTab);
 
   return (
@@ -431,8 +431,8 @@ export function HelpPage() {
         <button className={tab === 'user' ? 'active' : ''} onClick={() => setTab('user')}>
           User Guide
         </button>
-        <button className={tab === 'leader' ? 'active' : ''} onClick={() => setTab('leader')}>
-          Leader Guide
+        <button className={tab === 'creator' ? 'active' : ''} onClick={() => setTab('creator')}>
+          Creator Guide
         </button>
         <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>
           Admin Guide
@@ -443,7 +443,7 @@ export function HelpPage() {
       </div>
 
       {tab === 'user' && <UserGuide />}
-      {tab === 'leader' && <LeaderGuide />}
+      {tab === 'creator' && <CreatorGuide />}
       {tab === 'admin' && <AdminGuide />}
       {tab === 'faq' && <Faq />}
     </div>

@@ -9,7 +9,7 @@ datasource db {
 
 enum UserRole {
   ADMIN
-  LEADER
+  CREATOR
   USER
 }
 
@@ -118,6 +118,9 @@ model Survey {
   attributedResponses AttributedResponse[]
   responseAccess      SurveyResponseAccess[]
 
+  // A creator can never have two surveys/templates sharing the same title —
+  // including two drafts — so names stay unambiguous in their own lists.
+  @@unique([createdById, title])
   @@index([createdById])
   @@map("surveys")
 }
@@ -190,6 +193,11 @@ model SurveyRecipient {
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now()) @map("created_at")
 
+  // Set by the creator to grant this one recipient a single further
+  // submission after they've already responded (they otherwise cannot edit
+  // or resubmit). Consumed — reset back to false — the moment they use it.
+  resubmitAllowed Boolean @default(false) @map("resubmit_allowed")
+
   @@unique([surveyId, userId])
   @@index([userId])
   @@map("survey_recipients")
@@ -241,7 +249,7 @@ model AnonymousAnswerOption {
 
 // Backend-only linkage table. Sole mechanism for "have I already responded" and
 // "let me edit my response" on anonymous surveys. This model must NEVER be
-// queried from dashboard/leader-facing code (enforced by ESLint no-restricted-imports
+// queried from dashboard/creator-facing code (enforced by ESLint no-restricted-imports
 // on the repository module that owns access to this table).
 model SurveyResponseAccess {
   id          String            @id @default(uuid())
@@ -370,6 +378,9 @@ model OneOnOneTemplate {
   recipients OneOnOneRecipient[]
   runs       OneOnOneRun[]
 
+  // A creator can never have two 1:1 templates/live one-on-ones sharing the
+  // same title — including two drafts — so names stay unambiguous.
+  @@unique([createdById, title])
   @@map("one_on_one_templates")
 }
 

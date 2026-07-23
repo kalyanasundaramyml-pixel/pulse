@@ -20,12 +20,12 @@ function AppNav() {
       <NavLink to="/one-on-ones" className={({ isActive }) => (isActive && !isTemplateActive ? 'active' : '')}>
         One-on-Ones
       </NavLink>
-      {(user?.role === 'LEADER' || user?.role === 'ADMIN') && (
+      {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
         <NavLink to="/templates" className={({ isActive }) => (isActive || isTemplateActive ? 'active' : '')}>
           Templates
         </NavLink>
       )}
-      {(user?.role === 'LEADER' || user?.role === 'ADMIN') && (
+      {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
         <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
           Groups
         </NavLink>
@@ -51,11 +51,11 @@ export function AppShell() {
         <header className="app-header">
           <div className="app-logo">
             <span className="app-logo-mark">
-              <svg width="17" height="17" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <svg width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path
-                  d="M28,100 L58,100 L70,74 L82,126 L94,44 L106,156 L118,100 L172,100"
-                  stroke="currentColor"
-                  strokeWidth="16"
+                  d="M 10 50 L 30 50 L 35 40 L 42 60 L 50 15 L 58 85 L 65 40 L 70 50 L 90 50"
+                  stroke="#A0522D"
+                  strokeWidth="4.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />

@@ -18,15 +18,15 @@ export async function assertTemplateOwnerOrAdmin(templateId: string, user: User)
   return template;
 }
 
-// Read-and-use rule for templates: owner/Admin, OR any Leader/Admin when the
+// Read-and-use rule for templates: owner/Admin, OR any Creator/Admin when the
 // template is public. Only ever used for viewing a template and duplicating
 // it — never for editing it, adding recipients, or starting a run on it.
 export async function assertCanViewOrUseTemplate(templateId: string, user: User): Promise<OneOnOneTemplate> {
   const template = await getTemplateOr404(templateId);
   const isOwnerOrAdmin = user.role === 'ADMIN' || template.createdById === user.id;
-  const isPublicForLeader = template.isPublic && (user.role === 'LEADER' || user.role === 'ADMIN');
-  if (!isOwnerOrAdmin && !isPublicForLeader) {
-    throw new ForbiddenError('Only the template creator, an Admin, or (for a public template) another Leader may view this');
+  const isPublicForCreator = template.isPublic && (user.role === 'CREATOR' || user.role === 'ADMIN');
+  if (!isOwnerOrAdmin && !isPublicForCreator) {
+    throw new ForbiddenError('Only the template creator, an Admin, or (for a public template) another Creator may view this');
   }
   return template;
 }

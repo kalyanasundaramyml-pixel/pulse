@@ -2,7 +2,7 @@ import { User } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { NotFoundError } from '../../lib/errors';
 
-// Groups are a shared, org-wide resource: any Leader/Admin can create, view,
+// Groups are a shared, org-wide resource: any Creator/Admin can create, view,
 // edit, or delete any group — there is no per-group ownership lock beyond
 // recording createdById for audit purposes.
 

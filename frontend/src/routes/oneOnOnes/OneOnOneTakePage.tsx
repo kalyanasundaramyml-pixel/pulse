@@ -30,6 +30,7 @@ export function OneOnOneTakePage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
@@ -71,7 +72,7 @@ export function OneOnOneTakePage() {
     <div className="page survey-take-page">
       <h1>{data.template.title}</h1>
       {data.template.description && <p>{data.template.description}</p>}
-      <p className="muted">This 1:1 is linked to your name and reviewed by your leader.</p>
+      <p className="muted">This 1:1 is linked to your name and reviewed by your creator.</p>
 
       {welcome && (welcome.title || welcome.body) && (
         <div className="take-block-intro">
@@ -108,38 +109,44 @@ export function OneOnOneTakePage() {
                   <label>
                     {q.prompt} {q.isRequired && <span className="required">*</span>}
                   </label>
-                  {q.questionType === 'RATING' && (
+                  {previewMode ? (
+                    <p className="muted">{formatAnswer(q, answers[q.id])}</p>
+                  ) : (
                     <>
-                      <RatingInput
-                        min={q.ratingScaleMin ?? 1}
-                        max={q.ratingScaleMax ?? 5}
-                        value={answers[q.id]?.ratingValue}
-                        onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
-                      />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
-                    </>
-                  )}
-                  {q.questionType === 'TEXT' && (
-                    <TextInput
-                      value={answers[q.id]?.textValue ?? ''}
-                      onChange={(value) => updateAnswer(q.id, { textValue: value })}
-                    />
-                  )}
-                  {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
-                    <>
-                      <ChoiceInput
-                        options={q.options}
-                        multi={q.questionType === 'MULTI_CHOICE'}
-                        selected={answers[q.id]?.selectedOptionIds ?? []}
-                        onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
-                      />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
+                      {q.questionType === 'RATING' && (
+                        <>
+                          <RatingInput
+                            min={q.ratingScaleMin ?? 1}
+                            max={q.ratingScaleMax ?? 5}
+                            value={answers[q.id]?.ratingValue}
+                            onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+                          />
+                          <CommentField
+                            value={answers[q.id]?.commentText ?? ''}
+                            onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                          />
+                        </>
+                      )}
+                      {q.questionType === 'TEXT' && (
+                        <TextInput
+                          value={answers[q.id]?.textValue ?? ''}
+                          onChange={(value) => updateAnswer(q.id, { textValue: value })}
+                        />
+                      )}
+                      {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
+                        <>
+                          <ChoiceInput
+                            options={q.options}
+                            multi={q.questionType === 'MULTI_CHOICE'}
+                            selected={answers[q.id]?.selectedOptionIds ?? []}
+                            onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
+                          />
+                          <CommentField
+                            value={answers[q.id]?.commentText ?? ''}
+                            onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                          />
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -153,10 +160,32 @@ export function OneOnOneTakePage() {
             </div>
           )}
           {error && <p className="form-error">{error}</p>}
-          <p className="muted">You can only submit this once, so double-check your answers before submitting.</p>
-          <button onClick={handleSubmit} disabled={submitting} className="primary">
-            {submitting ? 'Submitting...' : 'Submit'}
-          </button>
+          <p className="muted">
+            {previewMode
+              ? 'Review your answers below, then confirm to submit.'
+              : 'You can only submit this once, so double-check your answers before submitting.'}
+          </p>
+          <div className="take-actions">
+            {previewMode ? (
+              <>
+                <button onClick={() => setPreviewMode(false)} disabled={submitting}>
+                  Back to edit
+                </button>
+                <button onClick={handleSubmit} disabled={submitting} className="primary">
+                  {submitting ? 'Submitting...' : 'Confirm & submit'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setPreviewMode(true)} disabled={submitting}>
+                  Preview & Submit
+                </button>
+                <button onClick={handleSubmit} disabled={submitting} className="primary">
+                  {submitting ? 'Submitting...' : 'Submit'}
+                </button>
+              </>
+            )}
+          </div>
         </>
       )}
     </div>

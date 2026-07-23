@@ -20,15 +20,15 @@ export async function assertSurveyOwnerOrAdmin(surveyId: string, user: User): Pr
 }
 
 // Read-and-use rule for templates: the owner/Admin, same as everywhere else,
-// OR any Leader/Admin when the survey is a public template. This is
+// OR any Creator/Admin when the survey is a public template. This is
 // deliberately narrower than assertSurveyOwnerOrAdmin — it is only ever used
 // for viewing a template and duplicating it, never for editing it in place.
 export async function assertCanViewOrUseTemplate(surveyId: string, user: User): Promise<Survey> {
   const survey = await getSurveyOr404(surveyId);
   const isOwnerOrAdmin = user.role === 'ADMIN' || survey.createdById === user.id;
-  const isPublicTemplateForLeader = survey.isTemplate && survey.isPublic && (user.role === 'LEADER' || user.role === 'ADMIN');
-  if (!isOwnerOrAdmin && !isPublicTemplateForLeader) {
-    throw new ForbiddenError('Only the survey creator, an Admin, or (for a public template) another Leader may view this');
+  const isPublicTemplateForCreator = survey.isTemplate && survey.isPublic && (user.role === 'CREATOR' || user.role === 'ADMIN');
+  if (!isOwnerOrAdmin && !isPublicTemplateForCreator) {
+    throw new ForbiddenError('Only the survey creator, an Admin, or (for a public template) another Creator may view this');
   }
   return survey;
 }

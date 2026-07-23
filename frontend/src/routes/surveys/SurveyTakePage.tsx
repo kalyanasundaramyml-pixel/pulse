@@ -1,13 +1,29 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { responsesApi } from '../../api/responses';
-import { AnswerInput, TakeSurveyResponse } from '../../types/api';
+import { AnswerInput, Question, TakeSurveyResponse } from '../../types/api';
 import { ApiError } from '../../api/client';
 import { AnonymityBadge } from '../../components/surveys/AnonymityBadge';
 import { RatingInput } from '../../components/surveys/RatingInput';
 import { ChoiceInput } from '../../components/surveys/ChoiceInput';
 import { TextInput } from '../../components/surveys/TextInput';
 import { CommentField } from '../../components/surveys/CommentField';
+
+// Read-only rendering of a locked (already-submitted) answer.
+function describeAnswer(question: Question, answer: AnswerInput | undefined): string {
+  if (!answer) return 'No answer given.';
+  const comment = answer.commentText ? ` (comment: ${answer.commentText})` : '';
+  if (question.questionType === 'RATING') {
+    return answer.ratingValue != null ? `${answer.ratingValue}${comment}` : `No answer given.${comment}`;
+  }
+  if (question.questionType === 'TEXT') {
+    return answer.textValue || 'No answer given.';
+  }
+  const labels = (answer.selectedOptionIds ?? [])
+    .map((optionId) => question.options.find((o) => o.id === optionId)?.label ?? optionId)
+    .join(', ');
+  return `${labels || 'No answer given.'}${comment}`;
+}
 
 export function SurveyTakePage() {
   const { id } = useParams<{ id: string }>();
@@ -17,6 +33,7 @@ export function SurveyTakePage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -45,14 +62,18 @@ export function SurveyTakePage() {
     setSubmitting(true);
     const answerList = Object.values(answers);
     try {
-      if (data.alreadyResponded) {
-        await responsesApi.edit(id, answerList);
-        setSuccessMessage('Your response has been updated.');
-      } else {
-        await responsesApi.submit(id, answerList);
-        setSuccessMessage('Your response has been submitted.');
-        setData({ ...data, alreadyResponded: true });
-      }
+      await responsesApi.submit(id, answerList);
+      setSuccessMessage(
+        data.alreadyResponded ? 'Your updated response has been submitted.' : 'Your response has been submitted.',
+      );
+      const now = new Date().toISOString();
+      setData({
+        ...data,
+        alreadyResponded: true,
+        canResubmit: false,
+        myResponse: { answers: answerList, submittedAt: data.myResponse?.submittedAt ?? now, updatedAt: now },
+      });
+      setPreviewMode(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to submit response');
     } finally {
@@ -67,6 +88,10 @@ export function SurveyTakePage() {
   const welcome = data.blocks.find((b) => b.blockType === 'WELCOME');
   const end = data.blocks.find((b) => b.blockType === 'END');
   const questionBlocks = data.blocks.filter((b) => b.blockType === 'QUESTIONS');
+  // A response is locked once submitted, unless the creator has explicitly
+  // reopened it for this person (a one-time grant, consumed on the next save).
+  const isLocked = data.alreadyResponded && !data.canResubmit;
+  const canAcceptResponses = data.survey.status === 'PUBLISHED' || data.canResubmit;
 
   return (
     <div className="page survey-take-page">
@@ -74,14 +99,23 @@ export function SurveyTakePage() {
       {data.survey.description && <p>{data.survey.description}</p>}
       <AnonymityBadge isAnonymous={data.survey.isAnonymous} />
 
-      {data.survey.status !== 'PUBLISHED' ? (
+      {!canAcceptResponses ? (
         <p className="muted">This survey is not currently accepting responses.</p>
       ) : (
         <>
-          {data.alreadyResponded && (
+          {isLocked && (
             <p className="muted">
-              You already responded to this survey. You can update your answers below and save again.
+              You already responded to this survey on {new Date(data.myResponse!.submittedAt).toLocaleDateString()}.
+              Responses cannot be edited once submitted.
             </p>
+          )}
+          {data.canResubmit && (
+            <p className="form-success">
+              Your creator has reopened this survey for you — you may submit an updated response below.
+            </p>
+          )}
+          {previewMode && !isLocked && (
+            <p className="muted">Review your answers below, then confirm to submit.</p>
           )}
 
           {welcome && (welcome.title || welcome.body) && (
@@ -99,38 +133,44 @@ export function SurveyTakePage() {
                   <label>
                     {q.prompt} {q.isRequired && <span className="required">*</span>}
                   </label>
-                  {q.questionType === 'RATING' && (
+                  {isLocked || previewMode ? (
+                    <p className="muted">{describeAnswer(q, answers[q.id])}</p>
+                  ) : (
                     <>
-                      <RatingInput
-                        min={q.ratingScaleMin ?? 1}
-                        max={q.ratingScaleMax ?? 5}
-                        value={answers[q.id]?.ratingValue}
-                        onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
-                      />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
-                    </>
-                  )}
-                  {q.questionType === 'TEXT' && (
-                    <TextInput
-                      value={answers[q.id]?.textValue ?? ''}
-                      onChange={(value) => updateAnswer(q.id, { textValue: value })}
-                    />
-                  )}
-                  {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
-                    <>
-                      <ChoiceInput
-                        options={q.options}
-                        multi={q.questionType === 'MULTI_CHOICE'}
-                        selected={answers[q.id]?.selectedOptionIds ?? []}
-                        onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
-                      />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
+                      {q.questionType === 'RATING' && (
+                        <>
+                          <RatingInput
+                            min={q.ratingScaleMin ?? 1}
+                            max={q.ratingScaleMax ?? 5}
+                            value={answers[q.id]?.ratingValue}
+                            onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+                          />
+                          <CommentField
+                            value={answers[q.id]?.commentText ?? ''}
+                            onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                          />
+                        </>
+                      )}
+                      {q.questionType === 'TEXT' && (
+                        <TextInput
+                          value={answers[q.id]?.textValue ?? ''}
+                          onChange={(value) => updateAnswer(q.id, { textValue: value })}
+                        />
+                      )}
+                      {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
+                        <>
+                          <ChoiceInput
+                            options={q.options}
+                            multi={q.questionType === 'MULTI_CHOICE'}
+                            selected={answers[q.id]?.selectedOptionIds ?? []}
+                            onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
+                          />
+                          <CommentField
+                            value={answers[q.id]?.commentText ?? ''}
+                            onChange={(commentText) => updateAnswer(q.id, { commentText })}
+                          />
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -147,9 +187,29 @@ export function SurveyTakePage() {
 
           {error && <p className="form-error">{error}</p>}
           {successMessage && <p className="form-success">{successMessage}</p>}
-          <button onClick={handleSubmit} disabled={submitting} className="primary">
-            {submitting ? 'Saving...' : data.alreadyResponded ? 'Update response' : 'Submit response'}
-          </button>
+          {!isLocked && (
+            <div className="take-actions">
+              {previewMode ? (
+                <>
+                  <button onClick={() => setPreviewMode(false)} disabled={submitting}>
+                    Back to edit
+                  </button>
+                  <button onClick={handleSubmit} disabled={submitting} className="primary">
+                    {submitting ? 'Saving...' : 'Confirm & submit'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setPreviewMode(true)} disabled={submitting}>
+                    Preview & Submit
+                  </button>
+                  <button onClick={handleSubmit} disabled={submitting} className="primary">
+                    {submitting ? 'Saving...' : data.alreadyResponded ? 'Submit updated response' : 'Submit response'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

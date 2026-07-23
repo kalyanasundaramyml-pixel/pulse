@@ -10,13 +10,38 @@ function assertDraft(survey: Survey) {
   }
 }
 
+// A creator can never have two surveys (draft or not, template or not) with the
+// same title. Auto-generated titles (create, duplicate) get silently
+// disambiguated with a " (2)", " (3)"... suffix; a deliberate rename instead
+// rejects via assertUniqueSurveyTitle so the person picks a different name.
+async function findUniqueSurveyTitle(createdById: string, baseTitle: string): Promise<string> {
+  let candidate = baseTitle;
+  let n = 1;
+  while (await prisma.survey.findFirst({ where: { createdById, title: candidate }, select: { id: true } })) {
+    n += 1;
+    candidate = `${baseTitle} (${n})`;
+  }
+  return candidate;
+}
+
+async function assertUniqueSurveyTitle(createdById: string, title: string, excludeId?: string) {
+  const existing = await prisma.survey.findFirst({
+    where: { createdById, title, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true },
+  });
+  if (existing) {
+    throw new ConflictError('DUPLICATE_TITLE', `You already have a survey named "${title}".`);
+  }
+}
+
 export async function createSurvey(
   user: User,
   input: { title: string; description?: string; isAnonymous: boolean; endDate?: string | null; isTemplate?: boolean },
 ) {
+  const title = await findUniqueSurveyTitle(user.id, input.title);
   return prisma.survey.create({
     data: {
-      title: input.title,
+      title,
       description: input.description,
       isAnonymous: input.isAnonymous,
       endDate: input.endDate ? new Date(input.endDate) : undefined,
@@ -41,31 +66,61 @@ export async function listSurveys(
     throw new AppError(403, 'FORBIDDEN', 'Only Admins may list all surveys');
   }
 
+  const withCounts = {
+    _count: { select: { questions: true, recipients: true, responseAccess: true, attributedResponses: true } },
+  };
+
   if (opts.scope === 'targeted') {
-    return prisma.survey.findMany({
+    const surveys = await prisma.survey.findMany({
       where: {
         status: opts.status,
         recipients: { some: { userId: user.id } },
       },
       orderBy: { createdAt: 'desc' },
+      include: withCounts,
     });
+
+    // Whether *this* user has already responded — the same self-check
+    // getTakeSurvey exposes as `alreadyResponded`, just computed in bulk here
+    // so the list can split "Pending" from "Completed". Checking one's own
+    // response status is never a privacy concern, anonymous survey or not.
+    const anonymousIds = surveys.filter((s) => s.isAnonymous).map((s) => s.id);
+    const attributedIds = surveys.filter((s) => !s.isAnonymous).map((s) => s.id);
+    const [anonResponded, attrResponded] = await Promise.all([
+      anonymousIds.length
+        ? prisma.surveyResponseAccess.findMany({
+            where: { userId: user.id, surveyId: { in: anonymousIds } },
+            select: { surveyId: true },
+          })
+        : Promise.resolve([]),
+      attributedIds.length
+        ? prisma.attributedResponse.findMany({
+            where: { respondentUserId: user.id, surveyId: { in: attributedIds } },
+            select: { surveyId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const respondedIds = new Set([...anonResponded.map((r) => r.surveyId), ...attrResponded.map((r) => r.surveyId)]);
+
+    return surveys.map((s) => ({ ...s, hasResponded: respondedIds.has(s.id) }));
   }
 
   if (opts.scope === 'all') {
-    return prisma.survey.findMany({ where: { status: opts.status }, orderBy: { createdAt: 'desc' } });
+    return prisma.survey.findMany({ where: { status: opts.status }, orderBy: { createdAt: 'desc' }, include: withCounts });
   }
 
   if (opts.scope === 'public') {
     return prisma.survey.findMany({
       where: { isTemplate: true, isPublic: true, createdById: { not: user.id } },
       orderBy: { createdAt: 'desc' },
-      include: { createdBy: { select: { id: true, name: true } } },
+      include: { createdBy: { select: { id: true, name: true } }, ...withCounts },
     });
   }
 
   return prisma.survey.findMany({
     where: { createdById: user.id, status: opts.status },
     orderBy: { createdAt: 'desc' },
+    include: withCounts,
   });
 }
 
@@ -105,6 +160,9 @@ export async function updateSurvey(
   }
   if (input.isPublic && !survey.isTemplate) {
     throw new ValidationError('Only templates can be made public');
+  }
+  if (input.title !== undefined && input.title !== survey.title) {
+    await assertUniqueSurveyTitle(survey.createdById, input.title, surveyId);
   }
   return prisma.survey.update({
     where: { id: surveyId },
@@ -220,9 +278,10 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
     prisma.surveyRecipient.findMany({ where: { surveyId }, select: { userId: true } }),
   ]);
 
+  const title = await findUniqueSurveyTitle(user.id, `Copy of ${survey.title}`);
   const duplicate = await prisma.survey.create({
     data: {
-      title: `Copy of ${survey.title}`,
+      title,
       description: survey.description,
       isAnonymous: survey.isAnonymous,
       isTemplate: asTemplate,
@@ -555,6 +614,30 @@ export async function removeRecipient(surveyId: string, targetUserId: string, us
   }
   await prisma.surveyRecipient.delete({ where: { surveyId_userId: { surveyId, userId: targetUserId } } }).catch(() => {
     throw new NotFoundError('Recipient not found');
+  });
+}
+
+// Grants one specific recipient a single further submission. A respondent
+// otherwise can never edit or resubmit once they've responded — this is the
+// only way back in, and it's scoped to exactly one person at a time.
+export async function reopenForRecipient(surveyId: string, targetUserId: string, user: User) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  if (survey.isAnonymous) {
+    throw new ValidationError('Anonymous surveys cannot be reopened for a specific person');
+  }
+  const recipient = await prisma.surveyRecipient.findUnique({
+    where: { surveyId_userId: { surveyId, userId: targetUserId } },
+  });
+  if (!recipient) {
+    throw new NotFoundError('Recipient not found');
+  }
+  const respondedIds = await findRespondedUserIds(surveyId, survey, [targetUserId]);
+  if (!respondedIds.has(targetUserId)) {
+    throw new ConflictError('NOT_YET_RESPONDED', 'This person has not submitted a response yet — there is nothing to reopen');
+  }
+  await prisma.surveyRecipient.update({
+    where: { surveyId_userId: { surveyId, userId: targetUserId } },
+    data: { resubmitAllowed: true },
   });
 }
 

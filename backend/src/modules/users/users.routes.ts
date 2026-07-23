@@ -22,7 +22,7 @@ usersRouter.post('/admin/users/import', requireRole('ADMIN'), upload.single('fil
 
 usersRouter.get(
   '/users/directory',
-  requireRole('LEADER', 'ADMIN'),
+  requireRole('CREATOR', 'ADMIN'),
   validate(directoryQuerySchema, 'query'),
   controller.searchDirectory,
 );
