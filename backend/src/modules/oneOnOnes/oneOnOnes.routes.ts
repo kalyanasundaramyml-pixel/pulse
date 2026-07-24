@@ -31,10 +31,17 @@ oneOnOnesRouter.get('/runs/mine', controller.getMyRuns);
 oneOnOnesRouter.get('/runs/:runId/take', controller.getTakeRun);
 oneOnOnesRouter.post('/runs/:runId/responses', validate(submitRunSchema), controller.submitRun);
 
-// Templates (Creator/Admin)
+// Templates (Creator/Admin) — the three read-only GETs also allow Auditor;
+// service-level checks (assertCanViewTemplateDetail/assertCanAuditTemplate)
+// scope that down to the Auditor's own group.
 oneOnOnesRouter.post('/', requireRole('CREATOR', 'ADMIN'), validate(createTemplateSchema), controller.createTemplate);
-oneOnOnesRouter.get('/', requireRole('CREATOR', 'ADMIN'), validate(listTemplatesQuerySchema, 'query'), controller.listTemplates);
-oneOnOnesRouter.get('/:id', requireRole('CREATOR', 'ADMIN'), controller.getTemplate);
+oneOnOnesRouter.get(
+  '/',
+  requireRole('CREATOR', 'ADMIN', 'AUDITOR'),
+  validate(listTemplatesQuerySchema, 'query'),
+  controller.listTemplates,
+);
+oneOnOnesRouter.get('/:id', requireRole('CREATOR', 'ADMIN', 'AUDITOR'), controller.getTemplate);
 oneOnOnesRouter.patch('/:id', requireRole('CREATOR', 'ADMIN'), validate(updateTemplateSchema), controller.updateTemplate);
 oneOnOnesRouter.delete('/:id', requireRole('CREATOR', 'ADMIN'), controller.deleteTemplate);
 oneOnOnesRouter.post('/:id/duplicate', requireRole('CREATOR', 'ADMIN'), validate(duplicateTemplateSchema), controller.duplicateTemplate);
@@ -53,10 +60,10 @@ oneOnOnesRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREAT
 
 oneOnOnesRouter.put('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 oneOnOnesRouter.post('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);
-oneOnOnesRouter.delete('/:id/recipients/:userId', requireRole('CREATOR', 'ADMIN'), controller.removeRecipient);
+oneOnOnesRouter.delete('/:id/recipients/:memberId', requireRole('CREATOR', 'ADMIN'), controller.removeRecipient);
 
 oneOnOnesRouter.post('/:id/runs', requireRole('CREATOR', 'ADMIN'), validate(startRunSchema), controller.startRun);
-oneOnOnesRouter.get('/:id/runs', requireRole('CREATOR', 'ADMIN'), controller.listRuns);
+oneOnOnesRouter.get('/:id/runs', requireRole('CREATOR', 'ADMIN', 'AUDITOR'), controller.listRuns);
 // No role gate here — a recipient may view their own trend; the service
-// enforces that non-owners can only ever request their own userId.
-oneOnOnesRouter.get('/:id/trend/:userId', controller.getTrend);
+// enforces that non-owners can only ever request their own memberId.
+oneOnOnesRouter.get('/:id/trend/:memberId', controller.getTrend);

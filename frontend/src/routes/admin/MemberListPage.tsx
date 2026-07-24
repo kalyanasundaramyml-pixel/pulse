@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { usersApi } from '../../api/users';
-import { AdminUserRow, UserRole } from '../../types/api';
+import { membersApi } from '../../api/members';
+import { groupsApi } from '../../api/groups';
+import { AdminMemberRow, Group, MemberRole } from '../../types/api';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/common/ToastProvider';
 
-const ROLES: UserRole[] = ['ADMIN', 'CREATOR', 'USER'];
+const ROLES: MemberRole[] = ['ADMIN', 'CREATOR', 'AUDITOR', 'MEMBER'];
 
-export function UserListPage() {
+export function MemberListPage() {
   const { showToast } = useToast();
-  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [members, setMembers] = useState<AdminMemberRow[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,10 +20,11 @@ export function UserListPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<UserRole>('USER');
+  const [newRole, setNewRole] = useState<MemberRole>('MEMBER');
+  const [newGroupId, setNewGroupId] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [createdUser, setCreatedUser] = useState<{ name: string; email: string; tempPassword: string } | null>(
+  const [createdMember, setCreatedMember] = useState<{ name: string; email: string; tempPassword: string } | null>(
     null,
   );
 
@@ -29,10 +32,10 @@ export function UserListPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await usersApi.list({ search: search || undefined });
-      setUsers(result.users);
+      const result = await membersApi.list({ search: search || undefined });
+      setMembers(result.members);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to load users');
+      setError(err instanceof ApiError ? err.message : 'Failed to load members');
     } finally {
       setLoading(false);
     }
@@ -40,41 +43,57 @@ export function UserListPage() {
 
   useEffect(() => {
     load();
+    groupsApi.list().then((res) => {
+      setGroups(res.groups);
+      const defaultGroup = res.groups.find((g) => g.isDefault);
+      if (defaultGroup) setNewGroupId(defaultGroup.id);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleRoleChange(id: string, role: UserRole) {
-    await usersApi.update(id, { role });
+  async function handleRoleChange(id: string, role: MemberRole) {
+    await membersApi.update(id, { role });
     await load();
     showToast('Role updated');
   }
 
-  async function handleToggleActive(id: string, isActive: boolean) {
-    await usersApi.update(id, { isActive: !isActive });
+  async function handleGroupChange(id: string, groupId: string) {
+    await membersApi.update(id, { groupId });
     await load();
-    showToast(isActive ? 'User deactivated' : 'User activated');
+    showToast('Group updated');
+  }
+
+  async function handleToggleActive(id: string, isActive: boolean) {
+    await membersApi.update(id, { isActive: !isActive });
+    await load();
+    showToast(isActive ? 'Member deactivated' : 'Member activated');
   }
 
   async function handleResetPassword(id: string) {
-    const result = await usersApi.resetPassword(id);
+    const result = await membersApi.resetPassword(id);
     setResetInfo({ id, tempPassword: result.tempPassword });
     showToast('Password reset');
   }
 
-  async function handleCreateUser(e: React.FormEvent) {
+  async function handleCreateMember(e: React.FormEvent) {
     e.preventDefault();
     setCreating(true);
     setCreateError(null);
     try {
-      const result = await usersApi.create({ name: newName, email: newEmail, role: newRole });
-      setCreatedUser({ name: result.user.name, email: result.user.email, tempPassword: result.tempPassword });
+      const result = await membersApi.create({
+        name: newName,
+        email: newEmail,
+        role: newRole,
+        groupId: newGroupId || undefined,
+      });
+      setCreatedMember({ name: result.member.name, email: result.member.email, tempPassword: result.tempPassword });
       setNewName('');
       setNewEmail('');
-      setNewRole('USER');
+      setNewRole('MEMBER');
       setShowCreateForm(false);
       load();
     } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : 'Failed to create user');
+      setCreateError(err instanceof ApiError ? err.message : 'Failed to create member');
     } finally {
       setCreating(false);
     }
@@ -83,26 +102,26 @@ export function UserListPage() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Users</h1>
+        <h1>Members</h1>
         <div className="actions">
           <button onClick={() => setShowCreateForm((v) => !v)}>
-            {showCreateForm ? 'Cancel' : 'Add user'}
+            {showCreateForm ? 'Cancel' : 'Add member'}
           </button>
-          <Link to="/admin/users/import" className="button">
+          <Link to="/admin/members/import" className="button">
             Import CSV
           </Link>
         </div>
       </div>
-      {createdUser && (
+      {createdMember && (
         <p className="import-result">
-          Created <strong>{createdUser.name}</strong> ({createdUser.email}). Temp password:{' '}
-          <span className="temp-password">{createdUser.tempPassword}</span> &mdash; share it with them now, it
+          Created <strong>{createdMember.name}</strong> ({createdMember.email}). Temp password:{' '}
+          <span className="temp-password">{createdMember.tempPassword}</span> &mdash; share it with them now, it
           will not be shown again.{' '}
-          <button onClick={() => setCreatedUser(null)}>Dismiss</button>
+          <button onClick={() => setCreatedMember(null)}>Dismiss</button>
         </p>
       )}
       {showCreateForm && (
-        <form className="survey-form" onSubmit={handleCreateUser}>
+        <form className="survey-form" onSubmit={handleCreateMember}>
           <label>
             Name
             <input value={newName} onChange={(e) => setNewName(e.target.value)} required />
@@ -113,7 +132,7 @@ export function UserListPage() {
           </label>
           <label>
             Role
-            <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)}>
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value as MemberRole)}>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
                   {r}
@@ -121,9 +140,19 @@ export function UserListPage() {
               ))}
             </select>
           </label>
+          <label>
+            Group
+            <select value={newGroupId} onChange={(e) => setNewGroupId(e.target.value)}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
           {createError && <p className="form-error">{createError}</p>}
           <button type="submit" disabled={creating}>
-            {creating ? 'Creating...' : 'Create user'}
+            {creating ? 'Creating...' : 'Create member'}
           </button>
         </form>
       )}
@@ -147,17 +176,18 @@ export function UserListPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
+              <th>Group</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.name}</td>
-                <td>{u.email}</td>
+            {members.map((m) => (
+              <tr key={m.id}>
+                <td>{m.name}</td>
+                <td>{m.email}</td>
                 <td>
-                  <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value as UserRole)}>
+                  <select value={m.role} onChange={(e) => handleRoleChange(m.id, e.target.value as MemberRole)}>
                     {ROLES.map((r) => (
                       <option key={r} value={r}>
                         {r}
@@ -165,13 +195,22 @@ export function UserListPage() {
                     ))}
                   </select>
                 </td>
-                <td>{u.isActive ? 'Active' : 'Deactivated'}</td>
+                <td>
+                  <select value={m.group.id} onChange={(e) => handleGroupChange(m.id, e.target.value)}>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>{m.isActive ? 'Active' : 'Deactivated'}</td>
                 <td className="actions">
-                  <button onClick={() => handleToggleActive(u.id, u.isActive)}>
-                    {u.isActive ? 'Deactivate' : 'Activate'}
+                  <button onClick={() => handleToggleActive(m.id, m.isActive)}>
+                    {m.isActive ? 'Deactivate' : 'Activate'}
                   </button>
-                  <button onClick={() => handleResetPassword(u.id)}>Reset password</button>
-                  {resetInfo?.id === u.id && (
+                  <button onClick={() => handleResetPassword(m.id)}>Reset password</button>
+                  {resetInfo?.id === m.id && (
                     <span className="temp-password">Temp password: {resetInfo.tempPassword}</span>
                   )}
                 </td>

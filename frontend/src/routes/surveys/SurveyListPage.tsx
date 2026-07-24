@@ -46,15 +46,16 @@ function NewSurveyMenu() {
 }
 
 export function SurveyListPage() {
-  const { user } = useAuth();
+  const { member } = useAuth();
   const initialView = getSurveyListView();
-  const [scope, setScope] = useState<'created' | 'targeted'>(initialView.scope);
+  const [scope, setScope] = useState<'created' | 'targeted' | 'audit' | 'viewing'>(initialView.scope);
   const [statusTab, setStatusTab] = useState<'draft' | 'active' | 'completed' | 'closed'>(initialView.statusTab);
   const [sort, setSort] = useState<DateSortOption>('createdDesc');
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canCreate = user?.role === 'CREATOR' || user?.role === 'ADMIN';
+  const canCreate = member?.role === 'CREATOR' || member?.role === 'ADMIN';
+  const isAuditor = member?.role === 'AUDITOR';
 
   useEffect(() => {
     setLoading(true);
@@ -71,10 +72,11 @@ export function SurveyListPage() {
   }, [scope, statusTab]);
 
   useEffect(() => {
-    if (!canCreate && scope !== 'targeted') setScope('targeted');
-  }, [canCreate, scope]);
+    if (scope === 'created' && !canCreate) setScope('targeted');
+    if (scope === 'audit' && !isAuditor) setScope('targeted');
+  }, [canCreate, isAuditor, scope]);
 
-  function changeScope(next: 'created' | 'targeted') {
+  function changeScope(next: 'created' | 'targeted' | 'audit' | 'viewing') {
     setScope(next);
     // "Drafts" and "Completed" only exist under one of the two scopes —
     // reset if the current tab wouldn't apply on the other side.
@@ -87,16 +89,19 @@ export function SurveyListPage() {
       ? surveys
           .filter((s) => !s.isTemplate)
           .filter((s) => (statusTab === 'draft' ? 'DRAFT' : statusTab === 'closed' ? 'CLOSED' : 'PUBLISHED') === s.status)
-      : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
-        // Pending/Completed split by the survey's own status vs whether this
-        // user has already responded — Closed always wins regardless of that.
-        surveys
-          .filter((s) => s.status !== 'DRAFT')
-          .filter((s) => {
-            if (statusTab === 'closed') return s.status === 'CLOSED';
-            if (statusTab === 'completed') return s.status !== 'CLOSED' && !!s.hasResponded;
-            return s.status !== 'CLOSED' && !s.hasResponded;
-          }),
+      : scope === 'audit' || scope === 'viewing'
+        ? // Read-only oversight views — every status, no sub-filtering.
+          surveys
+        : // Assigned to me: a recipient never sees a still-draft (unpublished) survey.
+          // Pending/Completed split by the survey's own status vs whether this
+          // member has already responded — Closed always wins regardless of that.
+          surveys
+            .filter((s) => s.status !== 'DRAFT')
+            .filter((s) => {
+              if (statusTab === 'closed') return s.status === 'CLOSED';
+              if (statusTab === 'completed') return s.status !== 'CLOSED' && !!s.hasResponded;
+              return s.status !== 'CLOSED' && !s.hasResponded;
+            }),
     sort,
   );
 
@@ -106,16 +111,24 @@ export function SurveyListPage() {
         <h1>Surveys</h1>
         {canCreate && <NewSurveyMenu />}
       </div>
-      {canCreate && (
-        <div className="tabs">
-          <button className={scope === 'targeted' ? 'active' : ''} onClick={() => changeScope('targeted')}>
-            Assigned to me
-          </button>
+      <div className="tabs">
+        <button className={scope === 'targeted' ? 'active' : ''} onClick={() => changeScope('targeted')}>
+          Assigned to me
+        </button>
+        {canCreate && (
           <button className={scope === 'created' ? 'active' : ''} onClick={() => changeScope('created')}>
             Created by me
           </button>
-        </div>
-      )}
+        )}
+        {isAuditor && (
+          <button className={scope === 'audit' ? 'active' : ''} onClick={() => changeScope('audit')}>
+            Audit
+          </button>
+        )}
+        <button className={scope === 'viewing' ? 'active' : ''} onClick={() => changeScope('viewing')}>
+          Viewing
+        </button>
+      </div>
       {scope === 'created' && (
         <div className="subtabs">
           <button className={statusTab === 'draft' ? 'active' : ''} onClick={() => setStatusTab('draft')}>
@@ -148,15 +161,22 @@ export function SurveyListPage() {
         <p>Loading...</p>
       ) : visibleSurveys.length === 0 ? (
         <p className="empty-state">
-          No {scope === 'targeted' && statusTab === 'active' ? 'pending' : statusTab} surveys here yet.
+          No {scope === 'audit' || scope === 'viewing' ? '' : scope === 'targeted' && statusTab === 'active' ? 'pending ' : `${statusTab} `}
+          surveys here yet.
         </p>
       ) : (
         <ul className="survey-list">
           {visibleSurveys.map((s) => {
             const completed = s.isAnonymous ? s._count?.responseAccess : s._count?.attributedResponses;
+            const linkTarget =
+              scope === 'targeted'
+                ? `/surveys/${s.id}/take`
+                : scope === 'audit' || scope === 'viewing'
+                  ? `/surveys/${s.id}/dashboard`
+                  : `/surveys/${s.id}/edit`;
             return (
               <li key={s.id} className={scope === 'created' ? 'has-corner-action' : undefined}>
-                <Link to={scope === 'targeted' ? `/surveys/${s.id}/take` : `/surveys/${s.id}/edit`} className="has-meta">
+                <Link to={linkTarget} className="has-meta">
                   <div className="survey-row">
                     <span className="survey-title">{s.title}</span>
                     <span className={`status-badge ${s.status.toLowerCase()}`}>{s.status}</span>
@@ -172,6 +192,11 @@ export function SurveyListPage() {
                         <span>
                           Participants {completed ?? 0}/{s._count?.recipients ?? 0}
                         </span>
+                      </>
+                    ) : scope === 'audit' || scope === 'viewing' ? (
+                      <>
+                        {s.createdBy && <span>By {s.createdBy.name}</span>}
+                        <span>Questions {s._count?.questions ?? 0}</span>
                       </>
                     ) : (
                       <>

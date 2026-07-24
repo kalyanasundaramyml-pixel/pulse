@@ -3,7 +3,7 @@ import * as dashboardService from './dashboard.service';
 
 export const getDashboard: RequestHandler = async (req, res, next) => {
   try {
-    const dashboard = await dashboardService.getDashboard(req.params.id, req.user!);
+    const dashboard = await dashboardService.getDashboard(req.params.id, req.member!);
     res.json(dashboard);
   } catch (err) {
     next(err);

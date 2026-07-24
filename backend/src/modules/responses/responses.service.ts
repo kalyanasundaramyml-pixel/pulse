@@ -1,4 +1,4 @@
-import { User } from '@prisma/client';
+import { Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { assertIsRecipient } from '../surveys/surveyAuth';
@@ -67,10 +67,10 @@ async function validateAnswers(surveyId: string, answers: AnswerInput[]) {
   }
 }
 
-export async function getTakeSurvey(surveyId: string, user: User) {
-  const survey = await assertIsRecipient(surveyId, user);
+export async function getTakeSurvey(surveyId: string, member: Member) {
+  const survey = await assertIsRecipient(surveyId, member);
   const recipient = await prisma.surveyRecipient.findUnique({
-    where: { surveyId_userId: { surveyId, userId: user.id } },
+    where: { surveyId_memberId: { surveyId, memberId: member.id } },
   });
 
   const blocks = await prisma.surveyBlock.findMany({
@@ -82,8 +82,8 @@ export async function getTakeSurvey(surveyId: string, user: User) {
   });
 
   const myResponse = survey.isAnonymous
-    ? await anonymousRepo.getMyResponseWithAnswers(surveyId, user.id)
-    : await attributedRepo.getMyResponseWithAnswers(surveyId, user.id);
+    ? await anonymousRepo.getMyResponseWithAnswers(surveyId, member.id)
+    : await attributedRepo.getMyResponseWithAnswers(surveyId, member.id);
 
   return {
     survey: {
@@ -130,10 +130,10 @@ export async function getTakeSurvey(surveyId: string, user: User) {
   };
 }
 
-export async function submitResponse(surveyId: string, user: User, answers: AnswerInput[]) {
-  const survey = await assertIsRecipient(surveyId, user);
+export async function submitResponse(surveyId: string, member: Member, answers: AnswerInput[]) {
+  const survey = await assertIsRecipient(surveyId, member);
   const recipient = await prisma.surveyRecipient.findUnique({
-    where: { surveyId_userId: { surveyId, userId: user.id } },
+    where: { surveyId_memberId: { surveyId, memberId: member.id } },
   });
   const canResubmit = recipient?.resubmitAllowed ?? false;
 
@@ -143,7 +143,7 @@ export async function submitResponse(surveyId: string, user: User, answers: Answ
   await validateAnswers(surveyId, answers);
 
   const repo = survey.isAnonymous ? anonymousRepo : attributedRepo;
-  const result = await repo.createResponse(surveyId, user.id, answers);
+  const result = await repo.createResponse(surveyId, member.id, answers);
 
   if (result.alreadyExisted) {
     if (!canResubmit) {
@@ -153,7 +153,7 @@ export async function submitResponse(surveyId: string, user: User, answers: Answ
     // One-time grant — reset immediately so a further resubmission needs a
     // fresh reopen from the creator.
     await prisma.surveyRecipient.update({
-      where: { surveyId_userId: { surveyId, userId: user.id } },
+      where: { surveyId_memberId: { surveyId, memberId: member.id } },
       data: { resubmitAllowed: false },
     });
   }
@@ -161,11 +161,11 @@ export async function submitResponse(surveyId: string, user: User, answers: Answ
   return { responseId: result.responseId };
 }
 
-export async function getMyResponse(surveyId: string, user: User) {
-  const survey = await assertIsRecipient(surveyId, user);
+export async function getMyResponse(surveyId: string, member: Member) {
+  const survey = await assertIsRecipient(surveyId, member);
   const response = survey.isAnonymous
-    ? await anonymousRepo.getMyResponseWithAnswers(surveyId, user.id)
-    : await attributedRepo.getMyResponseWithAnswers(surveyId, user.id);
+    ? await anonymousRepo.getMyResponseWithAnswers(surveyId, member.id)
+    : await attributedRepo.getMyResponseWithAnswers(surveyId, member.id);
   if (!response) {
     throw new NotFoundError('You have not responded to this survey yet');
   }

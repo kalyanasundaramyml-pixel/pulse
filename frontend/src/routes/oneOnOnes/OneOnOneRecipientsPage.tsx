@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { oneOnOnesApi } from '../../api/oneOnOnes';
-import { DirectoryUser } from '../../types/api';
+import { DirectoryMember } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -10,9 +10,9 @@ import { useToast } from '../../components/common/ToastProvider';
 export function OneOnOneRecipientsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { member } = useAuth();
   const { showToast } = useToast();
-  const [selected, setSelected] = useState<DirectoryUser[]>([]);
+  const [selected, setSelected] = useState<DirectoryMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +21,7 @@ export function OneOnOneRecipientsPage() {
     if (!id) return;
     oneOnOnesApi
       .get(id)
-      .then((res) => setSelected(res.template.recipients.map((r) => r.user)))
+      .then((res) => setSelected(res.template.recipients.map((r) => r.member)))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -49,7 +49,7 @@ export function OneOnOneRecipientsPage() {
     <div className="page">
       <h1>Manage recipients</h1>
       <p className="muted">The people you run this 1:1 template with. You can start a new 1:1 for anyone on this list.</p>
-      <RecipientPicker selected={selected} onChange={setSelected} excludeUserId={user?.id} />
+      <RecipientPicker selected={selected} onChange={setSelected} excludeMemberId={member?.id} />
       {error && <p className="form-error">{error}</p>}
       <button onClick={handleSave} disabled={saving} className="primary">
         {saving ? 'Saving...' : 'Save recipients'}

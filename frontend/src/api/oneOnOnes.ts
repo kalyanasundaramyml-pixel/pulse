@@ -14,7 +14,7 @@ import { QuestionInput } from './surveys';
 export const oneOnOnesApi = {
   create: (input: { title: string; description?: string; isTemplate?: boolean }) =>
     apiClient.post<{ template: OneOnOneTemplate }>('/one-on-ones', input),
-  list: (scope: 'created' | 'all' | 'public' = 'created') =>
+  list: (scope: 'created' | 'all' | 'public' | 'audit' = 'created') =>
     apiClient.get<{ templates: OneOnOneTemplate[] }>(`/one-on-ones?scope=${scope}`),
   get: (id: string) => apiClient.get<{ template: OneOnOneTemplateDetail }>(`/one-on-ones/${id}`),
   update: (id: string, input: Partial<{ title: string; description: string; isArchived: boolean; isPublic: boolean }>) =>
@@ -43,17 +43,17 @@ export const oneOnOnesApi = {
   reorderQuestions: (templateId: string, blockId: string, questionIds: string[]) =>
     apiClient.put<void>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/reorder`, { questionIds }),
 
-  setRecipients: (templateId: string, userIds: string[]) =>
-    apiClient.put<void>(`/one-on-ones/${templateId}/recipients`, { userIds }),
+  setRecipients: (templateId: string, memberIds: string[]) =>
+    apiClient.put<void>(`/one-on-ones/${templateId}/recipients`, { memberIds }),
 
-  startRun: (templateId: string, recipientUserId: string) =>
-    apiClient.post<{ run: OneOnOneRun }>(`/one-on-ones/${templateId}/runs`, { recipientUserId }),
-  listRuns: (templateId: string, recipientUserId?: string) => {
-    const qs = recipientUserId ? `?recipientUserId=${recipientUserId}` : '';
+  startRun: (templateId: string, recipientMemberId: string) =>
+    apiClient.post<{ run: OneOnOneRun }>(`/one-on-ones/${templateId}/runs`, { recipientMemberId }),
+  listRuns: (templateId: string, recipientMemberId?: string) => {
+    const qs = recipientMemberId ? `?recipientMemberId=${recipientMemberId}` : '';
     return apiClient.get<{ runs: OneOnOneRun[] }>(`/one-on-ones/${templateId}/runs${qs}`);
   },
-  getTrend: (templateId: string, userId: string) =>
-    apiClient.get<OneOnOneTrendResponse>(`/one-on-ones/${templateId}/trend/${userId}`),
+  getTrend: (templateId: string, memberId: string) =>
+    apiClient.get<OneOnOneTrendResponse>(`/one-on-ones/${templateId}/trend/${memberId}`),
 
   myRuns: () => apiClient.get<{ runs: OneOnOneRun[] }>('/one-on-ones/runs/mine'),
   takeRun: (runId: string) => apiClient.get<TakeOneOnOneResponse>(`/one-on-ones/runs/${runId}/take`),

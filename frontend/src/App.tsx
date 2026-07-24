@@ -8,10 +8,11 @@ import { SurveyBuilderPage } from './routes/surveys/SurveyBuilderPage';
 import { SurveyRecipientsPage } from './routes/surveys/SurveyRecipientsPage';
 import { SurveyTakePage } from './routes/surveys/SurveyTakePage';
 import { SurveyDashboardPage } from './routes/surveys/SurveyDashboardPage';
-import { UserListPage } from './routes/admin/UserListPage';
-import { UserImportPage } from './routes/admin/UserImportPage';
-import { GroupListPage } from './routes/groups/GroupListPage';
-import { GroupEditPage } from './routes/groups/GroupEditPage';
+import { MemberListPage } from './routes/admin/MemberListPage';
+import { MemberImportPage } from './routes/admin/MemberImportPage';
+import { GroupListPage } from './routes/admin/GroupListPage';
+import { CircleListPage } from './routes/circles/CircleListPage';
+import { CircleEditPage } from './routes/circles/CircleEditPage';
 import { OneOnOneListPage } from './routes/oneOnOnes/OneOnOneListPage';
 import { OneOnOneBuilderPage } from './routes/oneOnOnes/OneOnOneBuilderPage';
 import { OneOnOneRecipientsPage } from './routes/oneOnOnes/OneOnOneRecipientsPage';
@@ -37,7 +38,7 @@ function App() {
 
           <Route path="/one-on-ones" element={<OneOnOneListPage />} />
           <Route path="/one-on-ones/runs/:runId/take" element={<OneOnOneTakePage />} />
-          <Route path="/one-on-ones/:id/trend/:userId" element={<OneOnOneTrendPage />} />
+          <Route path="/one-on-ones/:id/trend/:memberId" element={<OneOnOneTrendPage />} />
           <Route path="/help" element={<HelpPage />} />
 
           <Route element={<ProtectedRoute roles={['CREATOR', 'ADMIN']} />}>
@@ -45,20 +46,24 @@ function App() {
             <Route path="/surveys/templates" element={<SurveyTemplateListPage variant="pick" />} />
             <Route path="/surveys/:id/edit" element={<SurveyBuilderPage />} />
             <Route path="/surveys/:id/recipients" element={<SurveyRecipientsPage />} />
-            <Route path="/groups" element={<GroupListPage />} />
-            <Route path="/groups/:id" element={<GroupEditPage />} />
+            <Route path="/circles" element={<CircleListPage />} />
+            <Route path="/circles/:id" element={<CircleEditPage />} />
             <Route path="/templates" element={<TemplatesHubPage />} />
             <Route path="/templates/surveys" element={<SurveyTemplateListPage />} />
             <Route path="/templates/one-on-ones" element={<OneOnOneTemplateListPage />} />
             <Route path="/one-on-ones/new" element={<OneOnOneBuilderPage />} />
             <Route path="/one-on-ones/templates" element={<OneOnOneTemplateListPage variant="pick" />} />
-            <Route path="/one-on-ones/:id/edit" element={<OneOnOneBuilderPage />} />
             <Route path="/one-on-ones/:id/recipients" element={<OneOnOneRecipientsPage />} />
           </Route>
 
+          <Route element={<ProtectedRoute roles={['CREATOR', 'ADMIN', 'AUDITOR']} />}>
+            <Route path="/one-on-ones/:id/edit" element={<OneOnOneBuilderPage />} />
+          </Route>
+
           <Route element={<ProtectedRoute roles={['ADMIN']} />}>
-            <Route path="/admin/users" element={<UserListPage />} />
-            <Route path="/admin/users/import" element={<UserImportPage />} />
+            <Route path="/admin/members" element={<MemberListPage />} />
+            <Route path="/admin/members/import" element={<MemberImportPage />} />
+            <Route path="/admin/groups" element={<GroupListPage />} />
           </Route>
         </Route>
       </Route>

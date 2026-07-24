@@ -1,7 +1,7 @@
 // Sole owner of reads/writes against survey_response_access. This is the ONLY
 // module allowed to import the SurveyResponseAccess model. It exists purely to
-// answer "has this user already responded" and "which response is theirs" for
-// the responding user's own request — never for creator/dashboard queries.
+// answer "has this member already responded" and "which response is theirs" for
+// the responding member's own request — never for creator/dashboard queries.
 // Enforced by an ESLint no-restricted-imports rule on modules/dashboard/**.
 import { prisma } from '../../db/prisma';
 
@@ -13,16 +13,16 @@ interface AnswerInput {
   commentText?: string;
 }
 
-export async function findMyResponseId(surveyId: string, userId: string): Promise<string | null> {
+export async function findMyResponseId(surveyId: string, memberId: string): Promise<string | null> {
   const access = await prisma.surveyResponseAccess.findUnique({
-    where: { surveyId_userId: { surveyId, userId } },
+    where: { surveyId_memberId: { surveyId, memberId } },
     select: { responseId: true },
   });
   return access?.responseId ?? null;
 }
 
-export async function getMyResponseWithAnswers(surveyId: string, userId: string) {
-  const responseId = await findMyResponseId(surveyId, userId);
+export async function getMyResponseWithAnswers(surveyId: string, memberId: string) {
+  const responseId = await findMyResponseId(surveyId, memberId);
   if (!responseId) {
     return null;
   }
@@ -32,10 +32,10 @@ export async function getMyResponseWithAnswers(surveyId: string, userId: string)
   });
 }
 
-export async function createResponse(surveyId: string, userId: string, answers: AnswerInput[]) {
+export async function createResponse(surveyId: string, memberId: string, answers: AnswerInput[]) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.surveyResponseAccess.findUnique({
-      where: { surveyId_userId: { surveyId, userId } },
+      where: { surveyId_memberId: { surveyId, memberId } },
     });
     if (existing) {
       return { alreadyExisted: true as const, responseId: existing.responseId };
@@ -62,7 +62,7 @@ export async function createResponse(surveyId: string, userId: string, answers: 
 
     // This is the only place in the codebase that writes to survey_response_access.
     await tx.surveyResponseAccess.create({
-      data: { surveyId, userId, responseId: response.id },
+      data: { surveyId, memberId, responseId: response.id },
     });
 
     return { alreadyExisted: false as const, responseId: response.id };

@@ -326,7 +326,7 @@ label {
   box-shadow: var(--shadow-xs);
 }
 
-.app-header-user {
+.app-header-member {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -346,7 +346,7 @@ label {
   flex-shrink: 0;
 }
 
-.app-header-user-name {
+.app-header-member-name {
   font-size: 13.5px;
   font-weight: 550;
   color: var(--text-h);
@@ -1172,13 +1172,13 @@ label {
   margin-bottom: 14px;
 }
 
-.group-add-row {
+.circle-add-row {
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
 }
 
-.group-add-row select {
+.circle-add-row select {
   flex: 1;
 }
 

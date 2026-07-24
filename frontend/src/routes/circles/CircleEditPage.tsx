@@ -1,30 +1,30 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { groupsApi } from '../../api/groups';
-import { DirectoryUser } from '../../types/api';
+import { circlesApi } from '../../api/circles';
+import { DirectoryMember } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/common/ToastProvider';
 
-export function GroupEditPage() {
+export function CircleEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [name, setName] = useState('');
-  const [members, setMembers] = useState<DirectoryUser[]>([]);
+  const [members, setMembers] = useState<DirectoryMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    groupsApi
+    circlesApi
       .get(id)
       .then((res) => {
-        setName(res.group.name);
-        setMembers(res.group.members);
+        setName(res.circle.name);
+        setMembers(res.circle.members);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load group'))
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load circle'))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -33,11 +33,11 @@ export function GroupEditPage() {
     setError(null);
     setSaving(true);
     try {
-      await groupsApi.update(id, { name, userIds: members.map((m) => m.id) });
-      showToast('Group saved');
-      navigate('/groups');
+      await circlesApi.update(id, { name, memberIds: members.map((m) => m.id) });
+      showToast('Circle saved');
+      navigate('/circles');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save group');
+      setError(err instanceof ApiError ? err.message : 'Failed to save circle');
     } finally {
       setSaving(false);
     }
@@ -47,17 +47,17 @@ export function GroupEditPage() {
 
   return (
     <div className="page">
-      <h1>Edit group</h1>
+      <h1>Edit circle</h1>
       <div className="survey-form">
         <label>
-          Group name
+          Circle name
           <input value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
       </div>
       <RecipientPicker selected={members} onChange={setMembers} />
       {error && <p className="form-error">{error}</p>}
       <button onClick={handleSave} disabled={saving || !name.trim()} className="primary">
-        {saving ? 'Saving...' : 'Save group'}
+        {saving ? 'Saving...' : 'Save circle'}
       </button>
     </div>
   );

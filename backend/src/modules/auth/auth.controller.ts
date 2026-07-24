@@ -5,14 +5,14 @@ import { UnauthorizedError } from '../../lib/errors';
 export const login: RequestHandler = async (req, res, next) => {
   try {
     const { email, password } = req.body as { email: string; password: string };
-    const user = await authService.authenticate(email, password);
+    const member = await authService.authenticate(email, password);
     req.session.regenerate((err) => {
       if (err) {
         next(err);
         return;
       }
-      req.session.userId = user.id;
-      res.json({ user: authService.toPublicUser(user) });
+      req.session.memberId = member.id;
+      res.json({ member: authService.toPublicMember(member) });
     });
   } catch (err) {
     next(err);
@@ -31,26 +31,26 @@ export const logout: RequestHandler = (req, res, next) => {
 };
 
 export const me: RequestHandler = (req, res, next) => {
-  if (!req.user) {
+  if (!req.member) {
     next(new UnauthorizedError());
     return;
   }
-  res.json({ user: authService.toPublicUser(req.user) });
+  res.json({ member: authService.toPublicMember(req.member) });
 };
 
 export const changePassword: RequestHandler = async (req, res, next) => {
   try {
-    if (!req.user) {
+    if (!req.member) {
       throw new UnauthorizedError();
     }
     const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string };
-    await authService.changePassword(req.user.id, currentPassword, newPassword);
+    await authService.changePassword(req.member.id, currentPassword, newPassword);
     req.session.regenerate((err) => {
       if (err) {
         next(err);
         return;
       }
-      req.session.userId = req.user!.id;
+      req.session.memberId = req.member!.id;
       res.status(204).end();
     });
   } catch (err) {

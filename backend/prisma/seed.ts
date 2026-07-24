@@ -5,6 +5,12 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
+  const commonGroup = await prisma.group.upsert({
+    where: { name: 'common' },
+    update: {},
+    create: { name: 'common', isDefault: true },
+  });
+
   const email = (process.env.ADMIN_BOOTSTRAP_EMAIL ?? '').toLowerCase();
   const name = process.env.ADMIN_BOOTSTRAP_NAME ?? 'Administrator';
   const tempPassword = process.env.ADMIN_BOOTSTRAP_TEMP_PASSWORD ?? '';
@@ -14,17 +20,17 @@ async function main() {
     return;
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existing = await prisma.member.findUnique({ where: { email } });
   if (existing) {
-    console.log(`Admin bootstrap: user ${email} already exists, skipping.`);
+    console.log(`Admin bootstrap: member ${email} already exists, skipping.`);
     return;
   }
 
   const passwordHash = await bcrypt.hash(tempPassword, 12);
-  await prisma.user.create({
-    data: { name, email, passwordHash, role: 'ADMIN', mustChangePassword: true },
+  await prisma.member.create({
+    data: { name, email, passwordHash, role: 'ADMIN', groupId: commonGroup.id, mustChangePassword: true },
   });
-  console.log(`Bootstrapped initial Admin user: ${email}`);
+  console.log(`Bootstrapped initial Admin member: ${email}`);
 }
 
 main()

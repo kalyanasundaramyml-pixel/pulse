@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 
-type GuideTab = 'user' | 'creator' | 'admin' | 'faq';
+type GuideTab = 'member' | 'creator' | 'auditor' | 'admin' | 'faq';
 
 function Section({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
@@ -12,7 +12,7 @@ function Section({ title, defaultOpen, children }: { title: string; defaultOpen?
   );
 }
 
-function UserGuide() {
+function MemberGuide() {
   return (
     <div className="help-guide">
       <p className="muted">
@@ -71,6 +71,15 @@ function UserGuide() {
           periodically (e.g. monthly), and can see how your answers change over time.
         </p>
       </Section>
+
+      <Section title="Viewing a survey's results as a Viewer">
+        <p>
+          An Auditor can grant you <strong>Viewer</strong> access to one specific survey — this lets you see its
+          dashboard and results even though you didn't create it and aren't its Auditor. Any survey you've been given
+          Viewer access to shows up under <strong>Surveys → Viewing</strong>. Viewer access can be granted or revoked
+          at any time, and it only ever applies to surveys, never to 1:1s.
+        </p>
+      </Section>
     </div>
   );
 }
@@ -126,7 +135,7 @@ function CreatorGuide() {
       <Section title="Choosing recipients">
         <p>
           Use <strong>Manage recipients</strong> to search the directory and add people individually, or add
-          everyone from a saved <strong>Group</strong> in one click. You can add or remove recipients at any time,
+          everyone from a saved <strong>Circle</strong> in one click. You can add or remove recipients at any time,
           even after publishing — the one exception is that someone who has already responded can never be removed.
         </p>
       </Section>
@@ -168,6 +177,12 @@ function CreatorGuide() {
           For <strong>Anonymous</strong> surveys, results for the whole survey are withheld until at least 3 people
           have responded — you'll see a "results withheld to protect anonymity" message instead of any chart until
           that threshold is met. This can't be overridden, including by an Admin.
+        </p>
+        <p>
+          Your group's <strong>Auditor</strong> can also see this dashboard, for compliance oversight — that's based
+          on your own group membership, not who you sent the survey to. They can additionally grant a specific
+          member or creator <strong>Viewer</strong> access to this one survey; you aren't asked and can't grant this
+          yourself. See <strong>Auditor Guide</strong> for details.
         </p>
       </Section>
 
@@ -214,13 +229,13 @@ function CreatorGuide() {
         </p>
       </Section>
 
-      <Section title="Groups">
+      <Section title="Circles">
         <p>
-          A Group is just a saved, named list of people — a shortcut for recipient-picking, not a live link. Create
-          and manage groups under <strong>Groups</strong>; any Creator or Admin can edit or delete any group, since
-          they're a shared, org-wide convenience rather than something you personally own. Adding a group to a
+          A Circle is just a saved, named list of people — a shortcut for recipient-picking, not a live link. Create
+          and manage circles under <strong>Circles</strong>; any Creator or Admin can edit or delete any circle, since
+          they're a shared, org-wide convenience rather than something you personally own. Adding a circle to a
           survey or 1:1's recipients copies its current members in as individual recipients — later changes to the
-          group don't retroactively affect a survey you've already sent.
+          circle don't retroactively affect a survey you've already sent.
         </p>
       </Section>
 
@@ -236,6 +251,58 @@ function CreatorGuide() {
   );
 }
 
+function AuditorGuide() {
+  return (
+    <div className="help-guide">
+      <p className="muted">
+        As an Auditor, you have read-only compliance oversight of every survey and 1:1 created by members of your
+        own Group — you can't edit, publish, or delete anything, and you can't create surveys or 1:1s yourself.
+      </p>
+
+      <Section title="What your oversight actually covers" defaultOpen>
+        <p>
+          Your access is based on the <strong>creator's</strong> Group, never the recipients'. If someone in your
+          Group creates a survey and sends it to a circle spanning several Groups, you can see it
+        </p>
+      </Section>
+
+      <Section title="Reviewing surveys">
+        <p>
+          Under <strong>Surveys → Audit</strong>, you'll see every survey created within your Group, at any status
+          (draft, published, or closed). Open one to go straight to its dashboard — the same results view its
+          creator sees, including every question's prompt and results. Anonymous surveys stay anonymous even to
+          you: the same 3-response withholding threshold and identity-stripping apply exactly as they do for the
+          creator.
+        </p>
+      </Section>
+
+      <Section title="Reviewing One-on-Ones">
+        <p>
+          Under <strong>One-on-Ones → Audit</strong>, you'll see every 1:1 template and live 1:1 created within
+          your Group. Opening one shows a read-only version of its questions and recipients — for anyone with two
+          or more completed runs, <strong>View trend</strong> shows how their answers changed over time, the same
+          as the creator sees it.
+        </p>
+      </Section>
+
+      <Section title="Granting and revoking Viewer access">
+        <p>
+          From a survey's dashboard, the <strong>Manage viewers</strong> panel lets you grant a specific member or
+          creator — inside or outside your Group — a narrow exception to see that one survey's dashboard, even
+          though they aren't its Auditor. Search for them by name or email and click <strong>Grant viewer</strong>.
+          They'll then find it under their own <strong>Surveys → Viewing</strong> tab.
+        </p>
+        <p>
+          You can revoke it again at any time from the same panel. Viewer access can be granted or revoked
+          regardless of the survey's status (draft, published, or closed), and it only ever applies to
+          surveys — there's no Viewer equivalent for 1:1s. The survey's own creator can never grant or revoke this
+          themselves; only an Auditor of that survey's Group, or an Admin, can.
+        </p>
+      </Section>
+    </div>
+  );
+}
+
 function AdminGuide() {
   return (
     <div className="help-guide">
@@ -244,21 +311,37 @@ function AdminGuide() {
         <strong>anyone's</strong> surveys and templates, not just your own. The tools below are Admin-only.
       </p>
 
-      <Section title="Creating a single user account" defaultOpen>
+      <Section title="Groups: org teams" defaultOpen>
         <p>
-          Under <strong>Admin</strong>, use the inline "create user" form (name, email, role) to add one person at a
-          time. You'll see their generated temporary password once, right after creation — copy it down, because it
-          isn't shown again. They'll be required to set their own password on first sign-in.
+          A <strong>Group</strong> represents a real team in your org — distinct from a Circle, which is just an
+          ad-hoc, shareable recipient list. Every member belongs to exactly <strong>one</strong> Group at a time.
+        </p>
+        <p>
+          Manage Groups under <strong>Groups</strong> — create, rename, or delete them. Every org starts with one
+          default Group ("common"); it can't be deleted, and it's where new members land if you don't pick a
+          Group explicitly. Any other Group can only be deleted once it has no members left in it — reassign them
+          first. A member's Group is set (and changed later) from the Admin member list, the same place you set
+          their role.
         </p>
       </Section>
 
-      <Section title="Bulk-importing users via CSV">
+      <Section title="Creating a single member account">
+        <p>
+          Under <strong>Admin</strong>, use the inline "create member" form (name, email, role, group) to add one
+          person at a time. You'll see their generated temporary password once, right after creation — copy it
+          down, because it isn't shown again. They'll be required to set their own password on first sign-in.
+        </p>
+      </Section>
+
+      <Section title="Bulk-importing members via CSV">
         <p>
           For adding many people at once, use <strong>Admin → Import CSV</strong>. The file needs a header row with
-          columns <code>name</code>, <code>email</code>, and optionally <code>role</code> (values{' '}
-          <code>ADMIN</code>/<code>CREATOR</code>/<code>USER</code>, case-insensitive; defaults to <code>USER</code>{' '}
-          if left blank). A sample file is available to download from that page. Limits: 2,000 rows and 2MB per
-          file.
+          columns <code>name</code>, <code>email</code>, and optionally <code>role</code> and <code>group</code>.{' '}
+          <code>role</code> defaults to <code>MEMBER</code> when omitted; accepted values are <code>ADMIN</code>,{' '}
+          <code>CREATOR</code>, <code>AUDITOR</code>, or <code>MEMBER</code> (case-insensitive). <code>group</code>{' '}
+          is also optional and defaults to the default Group; if given, it must match an existing Group's name
+          (case-insensitive) or that row is rejected. A sample file is available to download from that page.
+          Limits: 2,000 rows and 2MB per file.
         </p>
         <p>
           Import is best-effort per row — rows with a duplicate email (in the file or already in the system) or bad
@@ -268,13 +351,14 @@ function AdminGuide() {
         </p>
       </Section>
 
-      <Section title="Managing users">
-        <p>From the Admin user list you can, for any account:</p>
+      <Section title="Managing members">
+        <p>From the Admin member list you can, for any account:</p>
         <ul>
-          <li>Change their role (User / Creator / Admin) directly from the table.</li>
+          <li>Change their role (Member / Creator / Auditor / Admin) directly from the table.</li>
+          <li>Move them to a different Group directly from the table — they leave their old Group instantly.</li>
           <li>
             <strong>Deactivate</strong> or <strong>Activate</strong> them — a deactivated account can't sign in at
-            all. There's no way to permanently delete a user account; deactivating is the way to disable someone who
+            all. There's no way to permanently delete a member account; deactivating is the way to disable someone who
             leaves.
           </li>
           <li>
@@ -307,6 +391,8 @@ function FaqItem({ q, defaultOpen, children }: { q: string; defaultOpen?: boolea
 }
 
 function Faq() {
+  const { member } = useAuth();
+  const isAdmin = member?.role === 'ADMIN';
   return (
     <div className="help-guide">
       <FaqItem q="Is an anonymous survey really anonymous, even from Admins?" defaultOpen>
@@ -357,12 +443,38 @@ function Faq() {
           independent version. Only you (or an Admin) can edit the original.
         </p>
       </FaqItem>
-      <FaqItem q="What is a Group, and how is it different from a survey's recipient list?">
+      <FaqItem q="What is a Circle, and how is it different from a survey's recipient list?">
         <p>
-          A Group is just a saved, reusable list of people for quickly adding recipients — any Creator or Admin can
-          create, edit, or delete any group. Adding a group to a survey copies its current members in as individual
-          recipients at that moment; it isn't a live link, so changing the group later doesn't change who's already
+          A Circle is just a saved, reusable list of people for quickly adding recipients — any Creator or Admin can
+          create, edit, or delete any circle. Adding a circle to a survey copies its current members in as individual
+          recipients at that moment; it isn't a live link, so changing the circle later doesn't change who's already
           on a survey you sent.
+        </p>
+      </FaqItem>
+      {isAdmin && (
+        <FaqItem q="What is a Group, and how is it different from a Circle?">
+          <p>
+            A Group is a real org team — every member belongs to exactly one, and it's set by an Admin. A Circle is
+            just an ad-hoc, shareable recipient list that can freely mix people from any Group. Groups exist for one
+            purpose: scoping the Auditor role. Circles exist to speed up picking recipients. They're unrelated.
+          </p>
+        </FaqItem>
+      )}
+      <FaqItem q="What does an Auditor do, and who can see what?">
+        <p>
+          An Auditor gets read-only access to every survey and 1:1 created by someone in their own Group — based on
+          the <strong>creator's</strong> Group, not the recipients'. So a survey created by someone in Group A but
+          sent to a circle spanning Groups A and B is visible to Group A's Auditor only, not Group B's — unless
+          that specific person is separately given Viewer access (surveys only; see the next question). An Auditor
+          can't create, edit, publish, or delete anything themselves.
+        </p>
+      </FaqItem>
+      <FaqItem q="What is Viewer privilege, and who can grant it?">
+        <p>
+          Viewer is a narrow, per-person exception that lets one specific member or creator see one specific
+          survey's dashboard, regardless of their Group. Only an Auditor (of that survey's own Group) or an Admin
+          can grant or revoke it — never the survey's own creator. It can be set at any survey status, and it
+          never applies to 1:1s.
         </p>
       </FaqItem>
       <FaqItem q="Can I edit a question after people have already answered it?">
@@ -386,19 +498,23 @@ function Faq() {
           own answers, so you can see how someone's responses evolve check-in over check-in.
         </p>
       </FaqItem>
-      <FaqItem q="Can I permanently delete a user account?">
-        <p>
-          No — Admins can only deactivate an account (blocking sign-in) or change its role. There's no permanent
-          delete, so historical data (past responses, runs, audit trail) stays intact.
-        </p>
-      </FaqItem>
-      <FaqItem q="I imported a CSV of users — where did the temporary passwords go?">
-        <p>
-          They're shown once, right after the import finishes, with a button to download them all as a CSV. There's
-          no email relay, so make sure to save that file before you navigate away — it can't be retrieved again
-          afterward.
-        </p>
-      </FaqItem>
+      {isAdmin && (
+        <FaqItem q="Can I permanently delete a member account?">
+          <p>
+            No — Admins can only deactivate an account (blocking sign-in) or change its role. There's no permanent
+            delete, so historical data (past responses, runs, audit trail) stays intact.
+          </p>
+        </FaqItem>
+      )}
+      {isAdmin && (
+        <FaqItem q="I imported a CSV of members — where did the temporary passwords go?">
+          <p>
+            They're shown once, right after the import finishes, with a button to download them all as a CSV. There's
+            no email relay, so make sure to save that file before you navigate away — it can't be retrieved again
+            afterward.
+          </p>
+        </FaqItem>
+      )}
       <FaqItem q="Can a Creator see another Creator's private (non-public) surveys or templates?">
         <p>
           No — only the owner and Admins can see or manage a private survey or template. Marking something Public
@@ -416,8 +532,15 @@ function Faq() {
 }
 
 export function HelpPage() {
-  const { user } = useAuth();
-  const defaultTab: GuideTab = user?.role === 'ADMIN' ? 'admin' : user?.role === 'CREATOR' ? 'creator' : 'user';
+  const { member } = useAuth();
+  const defaultTab: GuideTab =
+    member?.role === 'ADMIN'
+      ? 'admin'
+      : member?.role === 'CREATOR'
+        ? 'creator'
+        : member?.role === 'AUDITOR'
+          ? 'auditor'
+          : 'member';
   const [tab, setTab] = useState<GuideTab>(defaultTab);
 
   return (
@@ -428,23 +551,34 @@ export function HelpPage() {
       <p className="muted">Guides for every role in Pulse, plus answers to common questions.</p>
 
       <div className="tabs">
-        <button className={tab === 'user' ? 'active' : ''} onClick={() => setTab('user')}>
-          User Guide
+        <button className={tab === 'member' ? 'active' : ''} onClick={() => setTab('member')}>
+          Member Guide
         </button>
-        <button className={tab === 'creator' ? 'active' : ''} onClick={() => setTab('creator')}>
-          Creator Guide
-        </button>
-        <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>
-          Admin Guide
-        </button>
+        {(member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN') && (
+          <button className={tab === 'creator' ? 'active' : ''} onClick={() => setTab('creator')}>
+            Creator Guide
+          </button>
+        )}
+        {(member?.role === 'AUDITOR' || member?.role === 'ADMIN') && (
+          <button className={tab === 'auditor' ? 'active' : ''} onClick={() => setTab('auditor')}>
+            Auditor Guide
+          </button>
+        )}
+        {member?.role === 'ADMIN' && (
+          <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>
+            Admin Guide
+          </button>
+        )}
         <button className={tab === 'faq' ? 'active' : ''} onClick={() => setTab('faq')}>
           FAQ
         </button>
       </div>
 
-      {tab === 'user' && <UserGuide />}
-      {tab === 'creator' && <CreatorGuide />}
-      {tab === 'admin' && <AdminGuide />}
+      {tab === 'member' && <MemberGuide />}
+      {tab === 'creator' &&
+        (member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN') && <CreatorGuide />}
+      {tab === 'auditor' && (member?.role === 'AUDITOR' || member?.role === 'ADMIN') && <AuditorGuide />}
+      {tab === 'admin' && member?.role === 'ADMIN' && <AdminGuide />}
       {tab === 'faq' && <Faq />}
     </div>
   );

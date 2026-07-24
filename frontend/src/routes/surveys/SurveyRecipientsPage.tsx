@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { surveysApi } from '../../api/surveys';
-import { DirectoryUser } from '../../types/api';
+import { DirectoryMember } from '../../types/api';
 import { RecipientPicker } from '../../components/surveys/RecipientPicker';
 import { ApiError } from '../../api/client';
 import { useToast } from '../../components/common/ToastProvider';
@@ -10,7 +10,7 @@ export function SurveyRecipientsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const [selected, setSelected] = useState<DirectoryUser[]>([]);
+  const [selected, setSelected] = useState<DirectoryMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export function SurveyRecipientsPage() {
     if (!id) return;
     surveysApi
       .get(id)
-      .then((res) => setSelected(res.survey.recipients.map((r) => r.user)))
+      .then((res) => setSelected(res.survey.recipients.map((r) => r.member)))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -36,7 +36,7 @@ export function SurveyRecipientsPage() {
         selected.map((u) => u.id),
       );
       showToast('Recipients saved');
-      if (result?.protectedUserIds?.length) {
+      if (result?.protectedMemberIds?.length) {
         setNotice(result.message);
       } else {
         navigate(`/surveys/${id}/edit`);

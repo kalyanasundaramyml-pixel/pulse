@@ -8,7 +8,7 @@ import { DateSortOption, SortSelect, sortByDate } from '../../components/common/
 import { useToast } from '../../components/common/ToastProvider';
 
 export function SurveyTemplateListPage({ variant = 'manage' }: { variant?: 'manage' | 'pick' }) {
-  const { user } = useAuth();
+  const { member } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [templates, setTemplates] = useState<Survey[]>([]);
@@ -69,7 +69,7 @@ export function SurveyTemplateListPage({ variant = 'manage' }: { variant?: 'mana
       ) : (
         <ul className="survey-list">
           {sortByDate(templates, sort).map((t) => {
-            const isOwn = t.createdById === user?.id;
+            const isOwn = t.createdById === member?.id;
             const canManage = variant === 'manage' && isOwn;
             return (
               <li key={t.id} className={canManage ? 'has-corner-action' : undefined}>

@@ -14,7 +14,7 @@ import { useToast } from '../../components/common/ToastProvider';
 export function SurveyBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { member } = useAuth();
   const { showToast } = useToast();
   const { setIsTemplateActive } = useTemplateNav();
   const [searchParams] = useSearchParams();
@@ -31,7 +31,7 @@ export function SurveyBuilderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [reopenDate, setReopenDate] = useState('');
   const [showReopenForm, setShowReopenForm] = useState(false);
-  const [reopeningUserId, setReopeningUserId] = useState<string | null>(null);
+  const [reopeningMemberId, setReopeningUserId] = useState<string | null>(null);
   const [blocksDirty, setBlocksDirty] = useState(false);
   const createdRef = useRef(false);
   const blockListRef = useRef<BlockListHandle>(null);
@@ -204,12 +204,12 @@ export function SurveyBuilderPage() {
     }
   }
 
-  async function handleReopenForRecipient(userId: string) {
+  async function handleReopenForRecipient(memberId: string) {
     if (!id) return;
     setError(null);
-    setReopeningUserId(userId);
+    setReopeningUserId(memberId);
     try {
-      await surveysApi.reopenForRecipient(id, userId);
+      await surveysApi.reopenForRecipient(id, memberId);
       await loadSurvey(id);
       showToast('Reopened for this recipient');
     } catch (err) {
@@ -311,7 +311,7 @@ export function SurveyBuilderPage() {
 
   const isDraft = survey.status === 'DRAFT';
   const isAnonymityLocked = survey.publishedAt != null;
-  const isOwner = user?.role === 'ADMIN' || survey.createdById === user?.id;
+  const isOwner = member?.role === 'ADMIN' || survey.createdById === member?.id;
   const hasUnsavedChanges =
     title !== survey.title ||
     description !== (survey.description ?? '') ||
@@ -438,9 +438,9 @@ export function SurveyBuilderPage() {
         {!survey.isTemplate && survey.recipients.length > 0 && (
           <ul className="recipient-status-list">
             {survey.recipients.map((r) => (
-              <li key={r.user.id}>
+              <li key={r.member.id}>
                 <span>
-                  {r.user.name} <span className="muted">{r.user.email}</span>
+                  {r.member.name} <span className="muted">{r.member.email}</span>
                 </span>
                 {/* Anonymous surveys can never single out one respondent — that
                     would undercut the anonymity guarantee — so no reopen option here. */}
@@ -450,10 +450,10 @@ export function SurveyBuilderPage() {
                   !isDraft && (
                     <button
                       type="button"
-                      disabled={reopeningUserId === r.user.id}
-                      onClick={() => handleReopenForRecipient(r.user.id)}
+                      disabled={reopeningMemberId === r.member.id}
+                      onClick={() => handleReopenForRecipient(r.member.id)}
                     >
-                      {reopeningUserId === r.user.id ? 'Reopening...' : 'Reopen'}
+                      {reopeningMemberId === r.member.id ? 'Reopening...' : 'Reopen'}
                     </button>
                   )
                 )}
@@ -502,7 +502,7 @@ export function SurveyBuilderPage() {
             </Link>
           </>
         )}
-        {(isDraft || user?.role === 'ADMIN') && (
+        {(isDraft || member?.role === 'ADMIN') && (
           <button onClick={handleDelete} className="danger">
             Delete {survey.isTemplate ? 'template' : 'survey'}
           </button>

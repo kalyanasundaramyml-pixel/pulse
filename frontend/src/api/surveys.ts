@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { Block, Question, QuestionType, Survey, SurveyDetail, SurveyStatus } from '../types/api';
+import { Block, DirectoryMember, Question, QuestionType, Survey, SurveyDetail, SurveyStatus } from '../types/api';
 
 export interface QuestionInput {
   questionType: QuestionType;
@@ -18,7 +18,7 @@ export const surveysApi = {
     endDate?: string | null;
     isTemplate?: boolean;
   }) => apiClient.post<{ survey: Survey }>('/surveys', input),
-  list: (scope: 'created' | 'targeted' | 'all' | 'public', status?: SurveyStatus) => {
+  list: (scope: 'created' | 'targeted' | 'all' | 'public' | 'audit' | 'viewing', status?: SurveyStatus) => {
     const qs = new URLSearchParams({ scope });
     if (status) qs.set('status', status);
     return apiClient.get<{ surveys: Survey[] }>(`/surveys?${qs.toString()}`);
@@ -55,15 +55,21 @@ export const surveysApi = {
   reorderQuestions: (surveyId: string, blockId: string, questionIds: string[]) =>
     apiClient.put<void>(`/surveys/${surveyId}/blocks/${blockId}/questions/reorder`, { questionIds }),
 
-  setRecipients: (surveyId: string, userIds: string[]) =>
-    apiClient.put<{ protectedUserIds: string[]; message: string } | undefined>(
+  setRecipients: (surveyId: string, memberIds: string[]) =>
+    apiClient.put<{ protectedMemberIds: string[]; message: string } | undefined>(
       `/surveys/${surveyId}/recipients`,
-      { userIds },
+      { memberIds },
     ),
-  addRecipients: (surveyId: string, userIds: string[]) =>
-    apiClient.post<void>(`/surveys/${surveyId}/recipients`, { userIds }),
-  removeRecipient: (surveyId: string, userId: string) =>
-    apiClient.delete<void>(`/surveys/${surveyId}/recipients/${userId}`),
-  reopenForRecipient: (surveyId: string, userId: string) =>
-    apiClient.post<void>(`/surveys/${surveyId}/recipients/${userId}/reopen`),
+  addRecipients: (surveyId: string, memberIds: string[]) =>
+    apiClient.post<void>(`/surveys/${surveyId}/recipients`, { memberIds }),
+  removeRecipient: (surveyId: string, memberId: string) =>
+    apiClient.delete<void>(`/surveys/${surveyId}/recipients/${memberId}`),
+  reopenForRecipient: (surveyId: string, memberId: string) =>
+    apiClient.post<void>(`/surveys/${surveyId}/recipients/${memberId}/reopen`),
+
+  listViewers: (surveyId: string) => apiClient.get<{ viewers: DirectoryMember[] }>(`/surveys/${surveyId}/viewers`),
+  grantViewer: (surveyId: string, memberId: string) =>
+    apiClient.post<void>(`/surveys/${surveyId}/viewers`, { memberId }),
+  revokeViewer: (surveyId: string, memberId: string) =>
+    apiClient.delete<void>(`/surveys/${surveyId}/viewers/${memberId}`),
 };

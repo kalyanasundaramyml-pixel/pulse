@@ -8,23 +8,23 @@ interface AnswerInput {
   commentText?: string;
 }
 
-export async function getMyResponseWithAnswers(surveyId: string, userId: string) {
+export async function getMyResponseWithAnswers(surveyId: string, memberId: string) {
   return prisma.attributedResponse.findUnique({
-    where: { surveyId_respondentUserId: { surveyId, respondentUserId: userId } },
+    where: { surveyId_respondentMemberId: { surveyId, respondentMemberId: memberId } },
     include: { answers: { include: { selectedOptions: true } } },
   });
 }
 
-export async function createResponse(surveyId: string, userId: string, answers: AnswerInput[]) {
+export async function createResponse(surveyId: string, memberId: string, answers: AnswerInput[]) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.attributedResponse.findUnique({
-      where: { surveyId_respondentUserId: { surveyId, respondentUserId: userId } },
+      where: { surveyId_respondentMemberId: { surveyId, respondentMemberId: memberId } },
     });
     if (existing) {
       return { alreadyExisted: true as const, responseId: existing.id };
     }
 
-    const response = await tx.attributedResponse.create({ data: { surveyId, respondentUserId: userId } });
+    const response = await tx.attributedResponse.create({ data: { surveyId, respondentMemberId: memberId } });
 
     for (const answer of answers) {
       const created = await tx.attributedAnswer.create({

@@ -1,6 +1,6 @@
 import { parse } from 'csv-parse/sync';
 import { z } from 'zod';
-import { UserRole } from '@prisma/client';
+import { MemberRole } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { hashPassword, generateTempPassword } from '../../lib/password';
 import { ValidationError } from '../../lib/errors';
@@ -14,14 +14,15 @@ const rowSchema = z.object({
     .trim()
     .toUpperCase()
     .optional()
-    .transform((v) => (v ? v : 'USER'))
-    .pipe(z.nativeEnum(UserRole)),
+    .transform((v) => (v ? v : 'MEMBER'))
+    .pipe(z.nativeEnum(MemberRole)),
 });
 
 interface RawRow {
   name?: string;
   email?: string;
   role?: string;
+  group?: string;
 }
 
 interface RowError {
@@ -34,7 +35,8 @@ interface ValidRow {
   row: number;
   name: string;
   email: string;
-  role: UserRole;
+  role: MemberRole;
+  groupId: string;
 }
 
 export interface ImportResult {
@@ -42,11 +44,11 @@ export interface ImportResult {
   totalRows: number;
   successCount: number;
   errorCount: number;
-  createdUsers: { name: string; email: string; role: UserRole; tempPassword: string }[];
+  createdMembers: { name: string; email: string; role: MemberRole; tempPassword: string }[];
   errors: RowError[];
 }
 
-export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string, filename?: string): Promise<ImportResult> {
+export async function importMembersFromCsv(csvBuffer: Buffer, importedById: string, filename?: string): Promise<ImportResult> {
   let records: RawRow[];
   try {
     records = parse(csvBuffer, {
@@ -65,6 +67,13 @@ export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string
     throw new ValidationError(`CSV file exceeds the maximum of ${CSV_IMPORT_MAX_ROWS} rows`);
   }
 
+  const groups = await prisma.group.findMany();
+  const groupIdByName = new Map(groups.map((g) => [g.name.toLowerCase(), g.id]));
+  const defaultGroup = groups.find((g) => g.isDefault);
+  if (!defaultGroup) {
+    throw new ValidationError('No default group configured');
+  }
+
   const validRows: ValidRow[] = [];
   const errors: RowError[] = [];
   const seenEmails = new Set<string>();
@@ -80,26 +89,36 @@ export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string
       errors.push({ row: rowNumber, email: parsed.data.email, message: 'duplicate email within this file' });
       return;
     }
+    const rawGroup = raw.group?.trim();
+    let groupId = defaultGroup.id;
+    if (rawGroup) {
+      const matched = groupIdByName.get(rawGroup.toLowerCase());
+      if (!matched) {
+        errors.push({ row: rowNumber, email: parsed.data.email, message: `unknown group "${rawGroup}"` });
+        return;
+      }
+      groupId = matched;
+    }
     seenEmails.add(parsed.data.email);
-    validRows.push({ row: rowNumber, ...parsed.data });
+    validRows.push({ row: rowNumber, ...parsed.data, groupId });
   });
 
-  // Check against existing users in bulk before the transaction.
+  // Check against existing members in bulk before the transaction.
   if (validRows.length > 0) {
-    const existing = await prisma.user.findMany({
+    const existing = await prisma.member.findMany({
       where: { email: { in: validRows.map((r) => r.email) } },
       select: { email: true },
     });
-    const existingEmails = new Set(existing.map((u) => u.email));
+    const existingEmails = new Set(existing.map((m) => m.email));
     for (let i = validRows.length - 1; i >= 0; i--) {
       if (existingEmails.has(validRows[i].email)) {
-        errors.push({ row: validRows[i].row, email: validRows[i].email, message: 'a user with this email already exists' });
+        errors.push({ row: validRows[i].row, email: validRows[i].email, message: 'a member with this email already exists' });
         validRows.splice(i, 1);
       }
     }
   }
 
-  const createdUsers: ImportResult['createdUsers'] = [];
+  const createdMembers: ImportResult['createdMembers'] = [];
 
   if (validRows.length > 0) {
     const toInsert = await Promise.all(
@@ -112,11 +131,12 @@ export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string
 
     await prisma.$transaction(
       toInsert.map(({ row, passwordHash }) =>
-        prisma.user.create({
+        prisma.member.create({
           data: {
             name: row.name,
             email: row.email,
             role: row.role,
+            groupId: row.groupId,
             passwordHash,
             mustChangePassword: true,
           },
@@ -125,16 +145,16 @@ export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string
     );
 
     for (const { row, tempPassword } of toInsert) {
-      createdUsers.push({ name: row.name, email: row.email, role: row.role, tempPassword });
+      createdMembers.push({ name: row.name, email: row.email, role: row.role, tempPassword });
     }
   }
 
-  const batch = await prisma.userImportBatch.create({
+  const batch = await prisma.memberImportBatch.create({
     data: {
       importedById,
       filename,
       totalRows: records.length,
-      successCount: createdUsers.length,
+      successCount: createdMembers.length,
       errorCount: errors.length,
       rowErrors: {
         create: errors.map((e) => ({ rowNumber: e.row, rawRow: { email: e.email ?? null }, message: e.message })),
@@ -145,9 +165,9 @@ export async function importUsersFromCsv(csvBuffer: Buffer, importedById: string
   return {
     batchId: batch.id,
     totalRows: records.length,
-    successCount: createdUsers.length,
+    successCount: createdMembers.length,
     errorCount: errors.length,
-    createdUsers,
+    createdMembers,
     errors,
   };
 }

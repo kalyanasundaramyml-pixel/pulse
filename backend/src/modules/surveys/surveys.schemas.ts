@@ -30,8 +30,12 @@ export const duplicateSurveySchema = z.object({
 });
 
 export const listSurveysQuerySchema = z.object({
-  scope: z.enum(['created', 'targeted', 'all', 'public']).default('created'),
+  scope: z.enum(['created', 'targeted', 'all', 'public', 'audit', 'viewing']).default('created'),
   status: z.enum(['DRAFT', 'PUBLISHED', 'CLOSED']).optional(),
+});
+
+export const grantViewerSchema = z.object({
+  memberId: z.string().uuid(),
 });
 
 export const createBlockSchema = z.object({
@@ -79,9 +83,9 @@ export const reorderQuestionsSchema = z.object({
 });
 
 export const setRecipientsSchema = z.object({
-  userIds: z.array(z.string().uuid()).min(1),
+  memberIds: z.array(z.string().uuid()).min(1),
 });
 
 export const addRecipientsSchema = z.object({
-  userIds: z.array(z.string().uuid()).min(1),
+  memberIds: z.array(z.string().uuid()).min(1),
 });

@@ -1,16 +1,16 @@
 import 'express-session';
-import { User } from '@prisma/client';
+import { Member } from '@prisma/client';
 
 declare module 'express-session' {
   interface SessionData {
-    userId?: string;
+    memberId?: string;
   }
 }
 
 declare global {
   namespace Express {
     interface Request {
-      user?: User;
+      member?: Member;
     }
   }
 }

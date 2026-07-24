@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/db/prisma';
-import { createUser, loginAgent, cleanupDatabase } from './helpers';
+import { createMember, loginAgent, cleanupDatabase } from './helpers';
 
 const app = createApp();
 
@@ -19,11 +19,11 @@ describe('anonymous survey response lifecycle', () => {
     await cleanupDatabase();
   });
 
-  it('enforces one response per user, allows editing, and keeps anonymous results structurally unlinkable', async () => {
-    const creator = await createUser('CREATOR', 'Creator');
-    const emp1 = await createUser('USER', 'Emp');
-    const emp2 = await createUser('USER', 'Emp');
-    const emp3 = await createUser('USER', 'Emp');
+  it('enforces one response per member, locks it after submit, and keeps anonymous results structurally unlinkable', async () => {
+    const creator = await createMember('CREATOR', 'Creator');
+    const emp1 = await createMember('MEMBER', 'Emp');
+    const emp2 = await createMember('MEMBER', 'Emp');
+    const emp3 = await createMember('MEMBER', 'Emp');
 
     const creatorAgent = await loginAgent(app, creator.email, creator.password);
 
@@ -48,7 +48,7 @@ describe('anonymous survey response lifecycle', () => {
 
     const recipientsRes = await creatorAgent
       .put(`/api/surveys/${surveyId}/recipients`)
-      .send({ userIds: [emp1.user.id, emp2.user.id, emp3.user.id] });
+      .send({ memberIds: [emp1.member.id, emp2.member.id, emp3.member.id] });
     expect(recipientsRes.status).toBe(204);
 
     const publishRes = await creatorAgent.post(`/api/surveys/${surveyId}/publish`);
@@ -76,18 +76,9 @@ describe('anonymous survey response lifecycle', () => {
     const anonCountAfterDup = await prisma.anonymousResponse.count({ where: { surveyId } });
     expect(anonCountAfterDup).toBe(1);
 
-    // Editing in place must work and must not create a second row.
-    const editRes = await emp1Agent
-      .patch(`/api/surveys/${surveyId}/responses/me`)
-      .send({ answers: [{ questionId, ratingValue: 5 }] });
-    expect(editRes.status).toBe(200);
-
-    const anonCountAfterEdit = await prisma.anonymousResponse.count({ where: { surveyId } });
-    expect(anonCountAfterEdit).toBe(1);
-
     const accessRows = await prisma.surveyResponseAccess.findMany({ where: { surveyId } });
     expect(accessRows).toHaveLength(1);
-    expect(accessRows[0].userId).toBe(emp1.user.id);
+    expect(accessRows[0].memberId).toBe(emp1.member.id);
 
     // Below the withholding threshold (only 1 of 3 recipients responded).
     const dashboardBelowThreshold = await creatorAgent.get(`/api/surveys/${surveyId}/dashboard`);
@@ -107,16 +98,16 @@ describe('anonymous survey response lifecycle', () => {
     // Structural guarantee: no `respondents` field exists anywhere on an anonymous dashboard response,
     // even for an Admin/creator viewing it — not just hidden by a flag.
     expect(dashboardAtThreshold.body).not.toHaveProperty('respondents');
-    expect(JSON.stringify(dashboardAtThreshold.body)).not.toContain(emp1.user.id);
+    expect(JSON.stringify(dashboardAtThreshold.body)).not.toContain(emp1.member.id);
     expect(JSON.stringify(dashboardAtThreshold.body)).not.toContain(emp1.email);
     expect(dashboardAtThreshold.body.questions[0].summary.withheld).toBe(false);
-    expect(dashboardAtThreshold.body.questions[0].summary.average).toBeCloseTo((5 + 3 + 5) / 3);
+    expect(dashboardAtThreshold.body.questions[0].summary.average).toBeCloseTo((4 + 3 + 5) / 3);
     expect(dashboardAtThreshold.body.completion.respondedCount).toBe(3);
   });
 
-  it('attributed surveys carry identity on the dashboard and still enforce one response per user', async () => {
-    const creator = await createUser('CREATOR', 'Creator');
-    const emp1 = await createUser('USER', 'Emp');
+  it('attributed surveys carry identity on the dashboard, enforce one response per member, and lock the response until reopened', async () => {
+    const creator = await createMember('CREATOR', 'Creator');
+    const emp1 = await createMember('MEMBER', 'Emp');
 
     const creatorAgent = await loginAgent(app, creator.email, creator.password);
     const createRes = await creatorAgent.post('/api/surveys').send({ title: 'Named Feedback', isAnonymous: false });
@@ -132,7 +123,7 @@ describe('anonymous survey response lifecycle', () => {
     });
     const questionId = questionRes.body.question.id;
 
-    await creatorAgent.put(`/api/surveys/${surveyId}/recipients`).send({ userIds: [emp1.user.id] });
+    await creatorAgent.put(`/api/surveys/${surveyId}/recipients`).send({ memberIds: [emp1.member.id] });
     await creatorAgent.post(`/api/surveys/${surveyId}/publish`);
 
     const emp1Agent = await loginAgent(app, emp1.email, emp1.password);
@@ -149,7 +140,22 @@ describe('anonymous survey response lifecycle', () => {
     const dashboard = await creatorAgent.get(`/api/surveys/${surveyId}/dashboard`);
     expect(dashboard.status).toBe(200);
     expect(dashboard.body.respondents).toHaveLength(1);
-    expect(dashboard.body.respondents[0].userId).toBe(emp1.user.id);
+    expect(dashboard.body.respondents[0].memberId).toBe(emp1.member.id);
     expect(dashboard.body.respondents[0].email).toBe(emp1.email);
+
+    // The creator can reopen this one recipient for exactly one more submission.
+    const reopenRes = await creatorAgent.post(`/api/surveys/${surveyId}/recipients/${emp1.member.id}/reopen`);
+    expect(reopenRes.status).toBe(204);
+
+    const resubmitRes = await emp1Agent
+      .post(`/api/surveys/${surveyId}/responses`)
+      .send({ answers: [{ questionId, textValue: 'Updated after reopen' }] });
+    expect(resubmitRes.status).toBe(201);
+
+    // The grant is consumed — a further attempt is rejected again.
+    const thirdRes = await emp1Agent
+      .post(`/api/surveys/${surveyId}/responses`)
+      .send({ answers: [{ questionId, textValue: 'Should fail' }] });
+    expect(thirdRes.status).toBe(409);
   });
 });

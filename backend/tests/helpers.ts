@@ -2,19 +2,42 @@ import request from 'supertest';
 import { Express } from 'express';
 import { prisma } from '../src/db/prisma';
 import { hashPassword } from '../src/lib/password';
-import { UserRole } from '@prisma/client';
+import { MemberRole } from '@prisma/client';
 
 let counter = 0;
+let defaultGroupId: string | null = null;
 
-export async function createUser(role: UserRole, namePrefix = 'Test') {
+async function resolveDefaultGroupId(): Promise<string> {
+  if (defaultGroupId) return defaultGroupId;
+  const group = await prisma.group.upsert({
+    where: { name: 'common' },
+    update: {},
+    create: { name: 'common', isDefault: true },
+  });
+  defaultGroupId = group.id;
+  return group.id;
+}
+
+export async function createGroup(name: string) {
+  return prisma.group.create({ data: { name } });
+}
+
+export async function createMember(role: MemberRole, namePrefix = 'Test', groupId?: string) {
   counter += 1;
   const email = `${namePrefix.toLowerCase()}${counter}.${Date.now()}@example.com`;
   const password = 'Password123!';
   const passwordHash = await hashPassword(password);
-  const user = await prisma.user.create({
-    data: { name: `${namePrefix} ${counter}`, email, role, passwordHash, mustChangePassword: false },
+  const member = await prisma.member.create({
+    data: {
+      name: `${namePrefix} ${counter}`,
+      email,
+      role,
+      groupId: groupId ?? (await resolveDefaultGroupId()),
+      passwordHash,
+      mustChangePassword: false,
+    },
   });
-  return { user, email, password };
+  return { member, email, password };
 }
 
 export async function loginAgent(app: Express, email: string, password: string) {
@@ -27,8 +50,8 @@ export async function loginAgent(app: Express, email: string, password: string) 
 }
 
 export async function cleanupDatabase() {
-  await prisma.userImportRowError.deleteMany();
-  await prisma.userImportBatch.deleteMany();
+  await prisma.memberImportRowError.deleteMany();
+  await prisma.memberImportBatch.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.anonymousAnswerOption.deleteMany();
   await prisma.anonymousAnswer.deleteMany();
@@ -41,5 +64,19 @@ export async function cleanupDatabase() {
   await prisma.questionOption.deleteMany();
   await prisma.question.deleteMany();
   await prisma.survey.deleteMany();
-  await prisma.user.deleteMany();
+  await prisma.oneOnOneAnswerOption.deleteMany();
+  await prisma.oneOnOneAnswer.deleteMany();
+  await prisma.oneOnOneRun.deleteMany();
+  await prisma.oneOnOneRecipient.deleteMany();
+  await prisma.oneOnOneQuestionOption.deleteMany();
+  await prisma.oneOnOneQuestion.deleteMany();
+  await prisma.oneOnOneBlock.deleteMany();
+  await prisma.oneOnOneTemplate.deleteMany();
+  await prisma.circleMember.deleteMany();
+  await prisma.circle.deleteMany();
+  await prisma.member.deleteMany();
+  // Non-default groups are test fixtures — wipe them between tests. The
+  // default "common" group is left in place since resolveDefaultGroupId()
+  // caches its id for the lifetime of the test process.
+  await prisma.group.deleteMany({ where: { isDefault: false } });
 }

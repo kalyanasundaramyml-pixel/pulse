@@ -9,7 +9,7 @@ function initials(name?: string) {
 }
 
 function AppNav() {
-  const { user } = useAuth();
+  const { member } = useAuth();
   const { isTemplateActive } = useTemplateNav();
 
   return (
@@ -20,19 +20,24 @@ function AppNav() {
       <NavLink to="/one-on-ones" className={({ isActive }) => (isActive && !isTemplateActive ? 'active' : '')}>
         One-on-Ones
       </NavLink>
-      {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
+      {(member?.role === 'CREATOR' || member?.role === 'ADMIN') && (
         <NavLink to="/templates" className={({ isActive }) => (isActive || isTemplateActive ? 'active' : '')}>
           Templates
         </NavLink>
       )}
-      {(user?.role === 'CREATOR' || user?.role === 'ADMIN') && (
-        <NavLink to="/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
-          Groups
+      {(member?.role === 'CREATOR' || member?.role === 'ADMIN') && (
+        <NavLink to="/circles" className={({ isActive }) => (isActive ? 'active' : '')}>
+          Circles
         </NavLink>
       )}
-      {user?.role === 'ADMIN' && (
-        <NavLink to="/admin/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+      {member?.role === 'ADMIN' && (
+        <NavLink to="/admin/members" className={({ isActive }) => (isActive ? 'active' : '')}>
           Admin
+        </NavLink>
+      )}
+      {member?.role === 'ADMIN' && (
+        <NavLink to="/admin/groups" className={({ isActive }) => (isActive ? 'active' : '')}>
+          Groups
         </NavLink>
       )}
       <NavLink to="/help" className={({ isActive }) => (isActive ? 'active' : '')}>
@@ -43,7 +48,7 @@ function AppNav() {
 }
 
 export function AppShell() {
-  const { user, logout } = useAuth();
+  const { member, logout } = useAuth();
 
   return (
     <TemplateNavProvider>
@@ -64,10 +69,10 @@ export function AppShell() {
             <span className="app-header-title">Pulse</span>
           </div>
           <AppNav />
-          <div className="app-header-user">
-            <span className="avatar">{initials(user?.name)}</span>
-            <span className="app-header-user-name">{user?.name}</span>
-            <span className="role-badge">{user?.role}</span>
+          <div className="app-header-member">
+            <span className="avatar">{initials(member?.name)}</span>
+            <span className="app-header-member-name">{member?.name}</span>
+            <span className="role-badge">{member?.role}</span>
             <button onClick={() => logout()}>Log out</button>
           </div>
         </header>

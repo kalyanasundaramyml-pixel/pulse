@@ -1,21 +1,24 @@
 import { z } from 'zod';
-import { UserRole } from '@prisma/client';
+import { MemberRole } from '@prisma/client';
 
-export const listUsersQuerySchema = z.object({
+export const listMembersQuerySchema = z.object({
   search: z.string().trim().optional(),
-  role: z.nativeEnum(UserRole).optional(),
+  role: z.nativeEnum(MemberRole).optional(),
+  groupId: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-export const createUserSchema = z.object({
+export const createMemberSchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().email(),
-  role: z.nativeEnum(UserRole).default('USER'),
+  role: z.nativeEnum(MemberRole).default('MEMBER'),
+  groupId: z.string().uuid().optional(),
 });
 
-export const updateUserSchema = z.object({
-  role: z.nativeEnum(UserRole).optional(),
+export const updateMemberSchema = z.object({
+  role: z.nativeEnum(MemberRole).optional(),
+  groupId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
 });
 

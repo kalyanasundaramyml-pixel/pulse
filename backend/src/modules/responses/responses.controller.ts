@@ -3,7 +3,7 @@ import * as responsesService from './responses.service';
 
 export const takeSurvey: RequestHandler = async (req, res, next) => {
   try {
-    const result = await responsesService.getTakeSurvey(req.params.id, req.user!);
+    const result = await responsesService.getTakeSurvey(req.params.id, req.member!);
     res.json(result);
   } catch (err) {
     next(err);
@@ -12,7 +12,7 @@ export const takeSurvey: RequestHandler = async (req, res, next) => {
 
 export const submitResponse: RequestHandler = async (req, res, next) => {
   try {
-    const result = await responsesService.submitResponse(req.params.id, req.user!, req.body.answers);
+    const result = await responsesService.submitResponse(req.params.id, req.member!, req.body.answers);
     res.status(201).json(result);
   } catch (err) {
     next(err);
@@ -21,7 +21,7 @@ export const submitResponse: RequestHandler = async (req, res, next) => {
 
 export const getMyResponse: RequestHandler = async (req, res, next) => {
   try {
-    const result = await responsesService.getMyResponse(req.params.id, req.user!);
+    const result = await responsesService.getMyResponse(req.params.id, req.member!);
     res.json(result);
   } catch (err) {
     next(err);

@@ -1,7 +1,12 @@
-import { Survey, SurveyBlock, QuestionType, User } from '@prisma/client';
+import { Survey, SurveyBlock, QuestionType, Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
-import { assertSurveyOwnerOrAdmin, assertCanViewOrUseTemplate, getSurveyOr404 } from './surveyAuth';
+import {
+  assertSurveyOwnerOrAdmin,
+  assertCanViewOrUseTemplate,
+  assertCanManageViewers,
+  getSurveyOr404,
+} from './surveyAuth';
 import { recordAuditLog } from '../../lib/auditLog';
 
 function assertDraft(survey: Survey) {
@@ -35,10 +40,10 @@ async function assertUniqueSurveyTitle(createdById: string, title: string, exclu
 }
 
 export async function createSurvey(
-  user: User,
+  member: Member,
   input: { title: string; description?: string; isAnonymous: boolean; endDate?: string | null; isTemplate?: boolean },
 ) {
-  const title = await findUniqueSurveyTitle(user.id, input.title);
+  const title = await findUniqueSurveyTitle(member.id, input.title);
   return prisma.survey.create({
     data: {
       title,
@@ -46,7 +51,7 @@ export async function createSurvey(
       isAnonymous: input.isAnonymous,
       endDate: input.endDate ? new Date(input.endDate) : undefined,
       isTemplate: input.isTemplate ?? false,
-      createdById: user.id,
+      createdById: member.id,
       blocks: {
         create: [
           { position: 0, blockType: 'WELCOME', title: 'Welcome' },
@@ -59,11 +64,17 @@ export async function createSurvey(
 }
 
 export async function listSurveys(
-  user: User,
-  opts: { scope: 'created' | 'targeted' | 'all' | 'public'; status?: 'DRAFT' | 'PUBLISHED' | 'CLOSED' },
+  member: Member,
+  opts: {
+    scope: 'created' | 'targeted' | 'all' | 'public' | 'audit' | 'viewing';
+    status?: 'DRAFT' | 'PUBLISHED' | 'CLOSED';
+  },
 ) {
-  if (opts.scope === 'all' && user.role !== 'ADMIN') {
+  if (opts.scope === 'all' && member.role !== 'ADMIN') {
     throw new AppError(403, 'FORBIDDEN', 'Only Admins may list all surveys');
+  }
+  if (opts.scope === 'audit' && member.role !== 'AUDITOR') {
+    throw new AppError(403, 'FORBIDDEN', 'Only Auditors may list surveys under audit');
   }
 
   const withCounts = {
@@ -74,13 +85,13 @@ export async function listSurveys(
     const surveys = await prisma.survey.findMany({
       where: {
         status: opts.status,
-        recipients: { some: { userId: user.id } },
+        recipients: { some: { memberId: member.id } },
       },
       orderBy: { createdAt: 'desc' },
       include: withCounts,
     });
 
-    // Whether *this* user has already responded — the same self-check
+    // Whether *this* member has already responded — the same self-check
     // getTakeSurvey exposes as `alreadyResponded`, just computed in bulk here
     // so the list can split "Pending" from "Completed". Checking one's own
     // response status is never a privacy concern, anonymous survey or not.
@@ -89,13 +100,13 @@ export async function listSurveys(
     const [anonResponded, attrResponded] = await Promise.all([
       anonymousIds.length
         ? prisma.surveyResponseAccess.findMany({
-            where: { userId: user.id, surveyId: { in: anonymousIds } },
+            where: { memberId: member.id, surveyId: { in: anonymousIds } },
             select: { surveyId: true },
           })
         : Promise.resolve([]),
       attributedIds.length
         ? prisma.attributedResponse.findMany({
-            where: { respondentUserId: user.id, surveyId: { in: attributedIds } },
+            where: { respondentMemberId: member.id, surveyId: { in: attributedIds } },
             select: { surveyId: true },
           })
         : Promise.resolve([]),
@@ -111,21 +122,37 @@ export async function listSurveys(
 
   if (opts.scope === 'public') {
     return prisma.survey.findMany({
-      where: { isTemplate: true, isPublic: true, createdById: { not: user.id } },
+      where: { isTemplate: true, isPublic: true, createdById: { not: member.id } },
+      orderBy: { createdAt: 'desc' },
+      include: { createdBy: { select: { id: true, name: true } }, ...withCounts },
+    });
+  }
+
+  if (opts.scope === 'audit') {
+    return prisma.survey.findMany({
+      where: { status: opts.status, createdBy: { groupId: member.groupId } },
+      orderBy: { createdAt: 'desc' },
+      include: { createdBy: { select: { id: true, name: true } }, ...withCounts },
+    });
+  }
+
+  if (opts.scope === 'viewing') {
+    return prisma.survey.findMany({
+      where: { status: opts.status, viewers: { some: { memberId: member.id } } },
       orderBy: { createdAt: 'desc' },
       include: { createdBy: { select: { id: true, name: true } }, ...withCounts },
     });
   }
 
   return prisma.survey.findMany({
-    where: { createdById: user.id, status: opts.status },
+    where: { createdById: member.id, status: opts.status },
     orderBy: { createdAt: 'desc' },
     include: withCounts,
   });
 }
 
-export async function getSurveyDetail(surveyId: string, user: User) {
-  await assertCanViewOrUseTemplate(surveyId, user);
+export async function getSurveyDetail(surveyId: string, member: Member) {
+  await assertCanViewOrUseTemplate(surveyId, member);
   const survey = await prisma.survey.findUnique({
     where: { id: surveyId },
     include: {
@@ -135,7 +162,7 @@ export async function getSurveyDetail(surveyId: string, user: User) {
           questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
         },
       },
-      recipients: { include: { user: { select: { id: true, name: true, email: true } } } },
+      recipients: { include: { member: { select: { id: true, name: true, email: true } } } },
       createdBy: { select: { id: true, name: true } },
     },
   });
@@ -147,10 +174,10 @@ export async function getSurveyDetail(surveyId: string, user: User) {
 
 export async function updateSurvey(
   surveyId: string,
-  user: User,
+  member: Member,
   input: { title?: string; description?: string; isAnonymous?: boolean; endDate?: string | null; isPublic?: boolean },
 ) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   if (input.isAnonymous !== undefined && input.isAnonymous !== survey.isAnonymous && survey.publishedAt != null) {
     throw new ConflictError(
@@ -176,14 +203,14 @@ export async function updateSurvey(
   });
 }
 
-export async function deleteSurvey(surveyId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
-  if (user.role !== 'ADMIN') {
+export async function deleteSurvey(surveyId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
+  if (member.role !== 'ADMIN') {
     assertDraft(survey);
   }
   await prisma.survey.delete({ where: { id: surveyId } });
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'SURVEY_DELETED',
     targetType: 'Survey',
     targetId: surveyId,
@@ -191,8 +218,8 @@ export async function deleteSurvey(surveyId: string, user: User) {
   });
 }
 
-export async function publishSurvey(surveyId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function publishSurvey(surveyId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   if (survey.isTemplate) {
     throw new ConflictError(
@@ -215,7 +242,7 @@ export async function publishSurvey(surveyId: string, user: User) {
     data: { status: 'PUBLISHED', publishedAt: new Date() },
   });
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'SURVEY_PUBLISHED',
     targetType: 'Survey',
     targetId: surveyId,
@@ -224,30 +251,30 @@ export async function publishSurvey(surveyId: string, user: User) {
   return published;
 }
 
-export async function closeSurvey(surveyId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function closeSurvey(surveyId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   if (survey.status !== 'PUBLISHED') {
     throw new ConflictError('SURVEY_NOT_PUBLISHED', 'Only a published survey can be closed');
   }
   const closed = await prisma.survey.update({ where: { id: surveyId }, data: { status: 'CLOSED', closedAt: new Date() } });
-  await recordAuditLog({ actorId: user.id, action: 'SURVEY_CLOSED', targetType: 'Survey', targetId: surveyId });
+  await recordAuditLog({ actorId: member.id, action: 'SURVEY_CLOSED', targetType: 'Survey', targetId: surveyId });
   return closed;
 }
 
-export async function unpublishSurvey(surveyId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function unpublishSurvey(surveyId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   if (survey.status !== 'PUBLISHED' && survey.status !== 'CLOSED') {
     throw new ConflictError('SURVEY_NOT_LIVE', 'Only a published or closed survey can be unpublished for editing');
   }
   // publishedAt / closedAt are left untouched — the isAnonymous lock keys off
   // "has this survey ever been published", not its current status.
   const draft = await prisma.survey.update({ where: { id: surveyId }, data: { status: 'DRAFT' } });
-  await recordAuditLog({ actorId: user.id, action: 'SURVEY_UNPUBLISHED', targetType: 'Survey', targetId: surveyId });
+  await recordAuditLog({ actorId: member.id, action: 'SURVEY_UNPUBLISHED', targetType: 'Survey', targetId: surveyId });
   return draft;
 }
 
-export async function reopenSurvey(surveyId: string, user: User, endDate?: string | null) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function reopenSurvey(surveyId: string, member: Member, endDate?: string | null) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   if (survey.status !== 'CLOSED') {
     throw new ConflictError('SURVEY_NOT_CLOSED', 'Only a closed survey can be reopened');
   }
@@ -261,12 +288,12 @@ export async function reopenSurvey(surveyId: string, user: User, endDate?: strin
       endDate: endDate ? new Date(endDate) : null,
     },
   });
-  await recordAuditLog({ actorId: user.id, action: 'SURVEY_REOPENED', targetType: 'Survey', targetId: surveyId });
+  await recordAuditLog({ actorId: member.id, action: 'SURVEY_REOPENED', targetType: 'Survey', targetId: surveyId });
   return reopened;
 }
 
-export async function duplicateSurvey(surveyId: string, user: User, asTemplate: boolean) {
-  const survey = await assertCanViewOrUseTemplate(surveyId, user);
+export async function duplicateSurvey(surveyId: string, member: Member, asTemplate: boolean) {
+  const survey = await assertCanViewOrUseTemplate(surveyId, member);
   const [blocks, recipients] = await Promise.all([
     prisma.surveyBlock.findMany({
       where: { surveyId },
@@ -275,10 +302,10 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
         questions: { orderBy: { position: 'asc' }, include: { options: { orderBy: { position: 'asc' } } } },
       },
     }),
-    prisma.surveyRecipient.findMany({ where: { surveyId }, select: { userId: true } }),
+    prisma.surveyRecipient.findMany({ where: { surveyId }, select: { memberId: true } }),
   ]);
 
-  const title = await findUniqueSurveyTitle(user.id, `Copy of ${survey.title}`);
+  const title = await findUniqueSurveyTitle(member.id, `Copy of ${survey.title}`);
   const duplicate = await prisma.survey.create({
     data: {
       title,
@@ -286,8 +313,8 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
       isAnonymous: survey.isAnonymous,
       isTemplate: asTemplate,
       isPublic: false,
-      createdById: user.id,
-      recipients: { create: recipients.map((r) => ({ userId: r.userId })) },
+      createdById: member.id,
+      recipients: { create: recipients.map((r) => ({ memberId: r.memberId })) },
       blocks: {
         create: blocks.map((b) => ({
           position: b.position,
@@ -325,7 +352,7 @@ export async function duplicateSurvey(surveyId: string, user: User, asTemplate: 
   }
 
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'SURVEY_DUPLICATED',
     targetType: 'Survey',
     targetId: duplicate.id,
@@ -350,8 +377,8 @@ async function getBlockOr404(surveyId: string, blockId: string): Promise<SurveyB
   return block;
 }
 
-export async function addBlock(surveyId: string, user: User, name: string) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function addBlock(surveyId: string, member: Member, name: string) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
   const endBlock = blocks.find((b) => b.blockType === 'END');
@@ -369,10 +396,10 @@ export async function addBlock(surveyId: string, user: User, name: string) {
 export async function updateBlock(
   surveyId: string,
   blockId: string,
-  user: User,
+  member: Member,
   input: { name?: string; title?: string; body?: string },
 ) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   await getBlockOr404(surveyId, blockId);
   return prisma.surveyBlock.update({
@@ -381,8 +408,8 @@ export async function updateBlock(
   });
 }
 
-export async function deleteBlock(surveyId: string, blockId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function deleteBlock(surveyId: string, blockId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const block = await getBlockOr404(surveyId, blockId);
   if (block.blockType !== 'QUESTIONS') {
@@ -401,8 +428,8 @@ export async function deleteBlock(surveyId: string, blockId: string, user: User)
   await prisma.surveyBlock.delete({ where: { id: blockId } });
 }
 
-export async function reorderBlocks(surveyId: string, user: User, blockIds: string[]) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function reorderBlocks(surveyId: string, member: Member, blockIds: string[]) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
   const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
@@ -436,8 +463,8 @@ interface QuestionInput {
   options?: string[];
 }
 
-export async function addQuestion(surveyId: string, blockId: string, user: User, input: QuestionInput) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function addQuestion(surveyId: string, blockId: string, member: Member, input: QuestionInput) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const block = await getBlockOr404(surveyId, blockId);
   if (block.blockType !== 'QUESTIONS') {
@@ -474,10 +501,10 @@ export async function updateQuestion(
   surveyId: string,
   blockId: string,
   questionId: string,
-  user: User,
+  member: Member,
   input: Partial<QuestionInput>,
 ) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
@@ -516,8 +543,8 @@ export async function updateQuestion(
   });
 }
 
-export async function deleteQuestion(surveyId: string, blockId: string, questionId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function deleteQuestion(surveyId: string, blockId: string, questionId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
@@ -530,8 +557,8 @@ export async function deleteQuestion(surveyId: string, blockId: string, question
   await prisma.question.delete({ where: { id: questionId } });
 }
 
-export async function reorderQuestions(surveyId: string, blockId: string, user: User, questionIds: string[]) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function reorderQuestions(surveyId: string, blockId: string, member: Member, questionIds: string[]) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
   await getBlockOr404(surveyId, blockId);
   const existing = await prisma.question.findMany({ where: { blockId }, select: { id: true } });
@@ -549,70 +576,70 @@ export async function reorderQuestions(surveyId: string, blockId: string, user: 
 
 // ===== Recipients =====
 
-async function findRespondedUserIds(surveyId: string, survey: Survey, candidateUserIds: string[]): Promise<Set<string>> {
-  if (candidateUserIds.length === 0) {
+async function findRespondedMemberIds(surveyId: string, survey: Survey, candidateMemberIds: string[]): Promise<Set<string>> {
+  if (candidateMemberIds.length === 0) {
     return new Set();
   }
   if (survey.isAnonymous) {
     const rows = await prisma.surveyResponseAccess.findMany({
-      where: { surveyId, userId: { in: candidateUserIds } },
-      select: { userId: true },
+      where: { surveyId, memberId: { in: candidateMemberIds } },
+      select: { memberId: true },
     });
-    return new Set(rows.map((r) => r.userId));
+    return new Set(rows.map((r) => r.memberId));
   }
   const rows = await prisma.attributedResponse.findMany({
-    where: { surveyId, respondentUserId: { in: candidateUserIds } },
-    select: { respondentUserId: true },
+    where: { surveyId, respondentMemberId: { in: candidateMemberIds } },
+    select: { respondentMemberId: true },
   });
-  return new Set(rows.map((r) => r.respondentUserId));
+  return new Set(rows.map((r) => r.respondentMemberId));
 }
 
-export async function setRecipients(surveyId: string, user: User, userIds: string[]) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function setRecipients(surveyId: string, member: Member, memberIds: string[]) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
 
   // A recipient who already responded must stay on the target list even if the
   // caller's payload omitted them — dropping them here wouldn't delete their
   // response, it would just misrepresent who was actually invited.
-  const currentRecipients = await prisma.surveyRecipient.findMany({ where: { surveyId }, select: { userId: true } });
-  const droppedCandidates = currentRecipients.map((r) => r.userId).filter((id) => !userIds.includes(id));
-  const respondedIds = await findRespondedUserIds(surveyId, survey, droppedCandidates);
+  const currentRecipients = await prisma.surveyRecipient.findMany({ where: { surveyId }, select: { memberId: true } });
+  const droppedCandidates = currentRecipients.map((r) => r.memberId).filter((id) => !memberIds.includes(id));
+  const respondedIds = await findRespondedMemberIds(surveyId, survey, droppedCandidates);
   const protectedIds = droppedCandidates.filter((id) => respondedIds.has(id));
-  const finalUserIds = Array.from(new Set([...userIds, ...protectedIds]));
+  const finalMemberIds = Array.from(new Set([...memberIds, ...protectedIds]));
 
   await prisma.$transaction([
-    prisma.surveyRecipient.deleteMany({ where: { surveyId, userId: { notIn: finalUserIds } } }),
-    ...finalUserIds.map((userId) =>
+    prisma.surveyRecipient.deleteMany({ where: { surveyId, memberId: { notIn: finalMemberIds } } }),
+    ...finalMemberIds.map((memberId) =>
       prisma.surveyRecipient.upsert({
-        where: { surveyId_userId: { surveyId, userId } },
-        create: { surveyId, userId },
+        where: { surveyId_memberId: { surveyId, memberId } },
+        create: { surveyId, memberId },
         update: {},
       }),
     ),
   ]);
 
-  return { protectedUserIds: protectedIds };
+  return { protectedMemberIds: protectedIds };
 }
 
-export async function addRecipients(surveyId: string, user: User, userIds: string[]) {
-  await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function addRecipients(surveyId: string, member: Member, memberIds: string[]) {
+  await assertSurveyOwnerOrAdmin(surveyId, member);
   await prisma.$transaction(
-    userIds.map((userId) =>
+    memberIds.map((memberId) =>
       prisma.surveyRecipient.upsert({
-        where: { surveyId_userId: { surveyId, userId } },
-        create: { surveyId, userId },
+        where: { surveyId_memberId: { surveyId, memberId } },
+        create: { surveyId, memberId },
         update: {},
       }),
     ),
   );
 }
 
-export async function removeRecipient(surveyId: string, targetUserId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
-  const respondedIds = await findRespondedUserIds(surveyId, survey, [targetUserId]);
-  if (respondedIds.has(targetUserId)) {
+export async function removeRecipient(surveyId: string, targetMemberId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
+  const respondedIds = await findRespondedMemberIds(surveyId, survey, [targetMemberId]);
+  if (respondedIds.has(targetMemberId)) {
     throw new ConflictError('ALREADY_RESPONDED', 'Cannot remove a recipient who has already responded to this survey');
   }
-  await prisma.surveyRecipient.delete({ where: { surveyId_userId: { surveyId, userId: targetUserId } } }).catch(() => {
+  await prisma.surveyRecipient.delete({ where: { surveyId_memberId: { surveyId, memberId: targetMemberId } } }).catch(() => {
     throw new NotFoundError('Recipient not found');
   });
 }
@@ -620,24 +647,70 @@ export async function removeRecipient(surveyId: string, targetUserId: string, us
 // Grants one specific recipient a single further submission. A respondent
 // otherwise can never edit or resubmit once they've responded — this is the
 // only way back in, and it's scoped to exactly one person at a time.
-export async function reopenForRecipient(surveyId: string, targetUserId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function reopenForRecipient(surveyId: string, targetMemberId: string, member: Member) {
+  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   if (survey.isAnonymous) {
     throw new ValidationError('Anonymous surveys cannot be reopened for a specific person');
   }
   const recipient = await prisma.surveyRecipient.findUnique({
-    where: { surveyId_userId: { surveyId, userId: targetUserId } },
+    where: { surveyId_memberId: { surveyId, memberId: targetMemberId } },
   });
   if (!recipient) {
     throw new NotFoundError('Recipient not found');
   }
-  const respondedIds = await findRespondedUserIds(surveyId, survey, [targetUserId]);
-  if (!respondedIds.has(targetUserId)) {
+  const respondedIds = await findRespondedMemberIds(surveyId, survey, [targetMemberId]);
+  if (!respondedIds.has(targetMemberId)) {
     throw new ConflictError('NOT_YET_RESPONDED', 'This person has not submitted a response yet — there is nothing to reopen');
   }
   await prisma.surveyRecipient.update({
-    where: { surveyId_userId: { surveyId, userId: targetUserId } },
+    where: { surveyId_memberId: { surveyId, memberId: targetMemberId } },
     data: { resubmitAllowed: true },
+  });
+}
+
+// ===== Viewer grants =====
+// A narrow exception granted by an Auditor (or Admin) letting one specific
+// member/creator see this survey's dashboard regardless of group. Applies at
+// any survey status — unlike most mutations here, this is never gated by
+// assertDraft.
+
+export async function listViewers(surveyId: string, member: Member) {
+  await assertCanManageViewers(surveyId, member);
+  const viewers = await prisma.surveyViewer.findMany({
+    where: { surveyId },
+    include: { member: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  return viewers.map((v) => v.member);
+}
+
+export async function grantViewer(surveyId: string, targetMemberId: string, member: Member) {
+  await assertCanManageViewers(surveyId, member);
+  await prisma.surveyViewer.upsert({
+    where: { surveyId_memberId: { surveyId, memberId: targetMemberId } },
+    create: { surveyId, memberId: targetMemberId, grantedById: member.id },
+    update: {},
+  });
+  await recordAuditLog({
+    actorId: member.id,
+    action: 'SURVEY_VIEWER_GRANTED',
+    targetType: 'Survey',
+    targetId: surveyId,
+    metadata: { memberId: targetMemberId },
+  });
+}
+
+export async function revokeViewer(surveyId: string, targetMemberId: string, member: Member) {
+  await assertCanManageViewers(surveyId, member);
+  await prisma.surveyViewer.delete({ where: { surveyId_memberId: { surveyId, memberId: targetMemberId } } }).catch(() => {
+    throw new NotFoundError('Viewer grant not found');
+  });
+  await recordAuditLog({
+    actorId: member.id,
+    action: 'SURVEY_VIEWER_REVOKED',
+    targetType: 'Survey',
+    targetId: surveyId,
+    metadata: { memberId: targetMemberId },
   });
 }
 

@@ -8,10 +8,13 @@ import { RatingDistributionChart } from '../../components/dashboard/RatingDistri
 import { ChoiceTallyChart } from '../../components/dashboard/ChoiceTallyChart';
 import { TextResponseList } from '../../components/dashboard/TextResponseList';
 import { RespondentTable } from '../../components/dashboard/RespondentTable';
+import { ManageViewers } from '../../components/dashboard/ManageViewers';
 import { AnonymityBadge } from '../../components/surveys/AnonymityBadge';
+import { useAuth } from '../../hooks/useAuth';
 
 export function SurveyDashboardPage() {
   const { id } = useParams<{ id: string }>();
+  const { member } = useAuth();
   const [dashboard, setDashboard] = useState<DashboardDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +80,8 @@ export function SurveyDashboardPage() {
           <RespondentTable respondents={dashboard.respondents} />
         </section>
       )}
+
+      {id && (member?.role === 'ADMIN' || member?.role === 'AUDITOR') && <ManageViewers surveyId={id} />}
     </div>
   );
 }

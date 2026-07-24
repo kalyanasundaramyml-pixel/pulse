@@ -1,7 +1,14 @@
-import { OneOnOneBlock, OneOnOneTemplate, QuestionType, User } from '@prisma/client';
+import { OneOnOneBlock, OneOnOneTemplate, QuestionType, Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
-import { assertTemplateOwnerOrAdmin, assertCanViewOrUseTemplate, assertIsRecipient, getTemplateOr404 } from './oneOnOneAuth';
+import {
+  assertTemplateOwnerOrAdmin,
+  assertCanViewOrUseTemplate,
+  assertCanViewTemplateDetail,
+  assertCanAuditTemplate,
+  assertIsRecipient,
+  getTemplateOr404,
+} from './oneOnOneAuth';
 import { recordAuditLog } from '../../lib/auditLog';
 
 // A pure template (isTemplate:true) can never be published — publishTemplate
@@ -40,14 +47,14 @@ async function assertUniqueTemplateTitle(createdById: string, title: string, exc
 
 // ===== Templates =====
 
-export async function createTemplate(user: User, input: { title: string; description?: string; isTemplate?: boolean }) {
-  const title = await findUniqueTemplateTitle(user.id, input.title);
+export async function createTemplate(member: Member, input: { title: string; description?: string; isTemplate?: boolean }) {
+  const title = await findUniqueTemplateTitle(member.id, input.title);
   return prisma.oneOnOneTemplate.create({
     data: {
       title,
       description: input.description,
       isTemplate: input.isTemplate ?? true,
-      createdById: user.id,
+      createdById: member.id,
       blocks: {
         create: [
           { position: 0, blockType: 'WELCOME', title: 'Welcome' },
@@ -59,25 +66,35 @@ export async function createTemplate(user: User, input: { title: string; descrip
   });
 }
 
-export async function listTemplates(user: User, scope: 'created' | 'all' | 'public') {
-  if (scope === 'all' && user.role !== 'ADMIN') {
+export async function listTemplates(member: Member, scope: 'created' | 'all' | 'public' | 'audit') {
+  if (scope === 'all' && member.role !== 'ADMIN') {
     throw new ForbiddenError('Only Admins may list all one-on-one templates');
+  }
+  if (scope === 'audit' && member.role !== 'AUDITOR') {
+    throw new ForbiddenError('Only Auditors may list one-on-ones under audit');
   }
   if (scope === 'public') {
     return prisma.oneOnOneTemplate.findMany({
-      where: { isPublic: true, createdById: { not: user.id } },
+      where: { isPublic: true, createdById: { not: member.id } },
+      orderBy: { createdAt: 'desc' },
+      include: { createdBy: { select: { id: true, name: true } } },
+    });
+  }
+  if (scope === 'audit') {
+    return prisma.oneOnOneTemplate.findMany({
+      where: { createdBy: { groupId: member.groupId } },
       orderBy: { createdAt: 'desc' },
       include: { createdBy: { select: { id: true, name: true } } },
     });
   }
   return prisma.oneOnOneTemplate.findMany({
-    where: scope === 'all' ? {} : { createdById: user.id },
+    where: scope === 'all' ? {} : { createdById: member.id },
     orderBy: { createdAt: 'desc' },
   });
 }
 
-export async function getTemplateDetail(templateId: string, user: User) {
-  const template = await assertCanViewOrUseTemplate(templateId, user);
+export async function getTemplateDetail(templateId: string, member: Member) {
+  const template = await assertCanViewTemplateDetail(templateId, member);
   const [blocks, recipients, runCounts] = await Promise.all([
     prisma.oneOnOneBlock.findMany({
       where: { templateId },
@@ -88,24 +105,24 @@ export async function getTemplateDetail(templateId: string, user: User) {
     }),
     prisma.oneOnOneRecipient.findMany({
       where: { templateId },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { member: { select: { id: true, name: true, email: true } } },
     }),
-    prisma.oneOnOneRun.groupBy({ by: ['respondentUserId'], where: { templateId }, _count: { _all: true } }),
+    prisma.oneOnOneRun.groupBy({ by: ['respondentMemberId'], where: { templateId }, _count: { _all: true } }),
   ]);
-  const runCountByUser = new Map(runCounts.map((r) => [r.respondentUserId, r._count._all]));
+  const runCountByMember = new Map(runCounts.map((r) => [r.respondentMemberId, r._count._all]));
   return {
     ...template,
     blocks,
-    recipients: recipients.map((r) => ({ ...r, runCount: runCountByUser.get(r.userId) ?? 0 })),
+    recipients: recipients.map((r) => ({ ...r, runCount: runCountByMember.get(r.memberId) ?? 0 })),
   };
 }
 
 export async function updateTemplate(
   templateId: string,
-  user: User,
+  member: Member,
   input: { title?: string; description?: string; isArchived?: boolean; isPublic?: boolean },
 ) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   // Archiving and the public flag are allowed regardless of publish status —
   // only renaming/re-describing requires being back in DRAFT first.
   if (input.title !== undefined || input.description !== undefined) {
@@ -120,8 +137,8 @@ export async function updateTemplate(
   return prisma.oneOnOneTemplate.update({ where: { id: templateId }, data: input });
 }
 
-export async function publishTemplate(templateId: string, user: User) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function publishTemplate(templateId: string, member: Member) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   if (template.isTemplate) {
     throw new ConflictError(
@@ -141,7 +158,7 @@ export async function publishTemplate(templateId: string, user: User) {
   }
   const published = await prisma.oneOnOneTemplate.update({ where: { id: templateId }, data: { status: 'PUBLISHED' } });
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'ONE_ON_ONE_PUBLISHED',
     targetType: 'OneOnOneTemplate',
     targetId: templateId,
@@ -150,18 +167,18 @@ export async function publishTemplate(templateId: string, user: User) {
   return published;
 }
 
-export async function unpublishTemplate(templateId: string, user: User) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function unpublishTemplate(templateId: string, member: Member) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   if (template.status !== 'PUBLISHED') {
     throw new ConflictError('TEMPLATE_NOT_PUBLISHED', 'Only a published one-on-one can be unpublished for editing');
   }
   const draft = await prisma.oneOnOneTemplate.update({ where: { id: templateId }, data: { status: 'DRAFT' } });
-  await recordAuditLog({ actorId: user.id, action: 'ONE_ON_ONE_UNPUBLISHED', targetType: 'OneOnOneTemplate', targetId: templateId });
+  await recordAuditLog({ actorId: member.id, action: 'ONE_ON_ONE_UNPUBLISHED', targetType: 'OneOnOneTemplate', targetId: templateId });
   return draft;
 }
 
-export async function duplicateTemplate(templateId: string, user: User, asTemplate: boolean) {
-  const template = await assertCanViewOrUseTemplate(templateId, user);
+export async function duplicateTemplate(templateId: string, member: Member, asTemplate: boolean) {
+  const template = await assertCanViewOrUseTemplate(templateId, member);
   const blocks = await prisma.oneOnOneBlock.findMany({
     where: { templateId },
     orderBy: { position: 'asc' },
@@ -170,25 +187,25 @@ export async function duplicateTemplate(templateId: string, user: User, asTempla
     },
   });
 
-  // Recipients only carry over when the acting user already owns the source
+  // Recipients only carry over when the acting member already owns the source
   // template (e.g. initiating a live one-on-one from your own pre-populated
   // template). A non-owner forking or initiating from someone else's public
   // template never inherits their recipients — those are a different
   // creator's own reports, not the copier's.
-  const isOwner = template.createdById === user.id;
+  const isOwner = template.createdById === member.id;
   const recipients = isOwner
-    ? await prisma.oneOnOneRecipient.findMany({ where: { templateId }, select: { userId: true } })
+    ? await prisma.oneOnOneRecipient.findMany({ where: { templateId }, select: { memberId: true } })
     : [];
 
-  const title = await findUniqueTemplateTitle(user.id, `Copy of ${template.title}`);
+  const title = await findUniqueTemplateTitle(member.id, `Copy of ${template.title}`);
   const duplicate = await prisma.oneOnOneTemplate.create({
     data: {
       title,
       description: template.description,
-      createdById: user.id,
+      createdById: member.id,
       isPublic: false,
       isTemplate: asTemplate,
-      recipients: { create: recipients.map((r) => ({ userId: r.userId })) },
+      recipients: { create: recipients.map((r) => ({ memberId: r.memberId })) },
       blocks: {
         create: blocks.map((b) => ({
           position: b.position,
@@ -226,7 +243,7 @@ export async function duplicateTemplate(templateId: string, user: User, asTempla
   }
 
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'ONE_ON_ONE_TEMPLATE_DUPLICATED',
     targetType: 'OneOnOneTemplate',
     targetId: duplicate.id,
@@ -236,8 +253,8 @@ export async function duplicateTemplate(templateId: string, user: User, asTempla
   return duplicate;
 }
 
-export async function deleteTemplate(templateId: string, user: User) {
-  await assertTemplateOwnerOrAdmin(templateId, user);
+export async function deleteTemplate(templateId: string, member: Member) {
+  await assertTemplateOwnerOrAdmin(templateId, member);
   const runCount = await prisma.oneOnOneRun.count({ where: { templateId } });
   if (runCount > 0) {
     throw new ConflictError(
@@ -259,8 +276,8 @@ async function getBlockOr404(templateId: string, blockId: string): Promise<OneOn
   return block;
 }
 
-export async function addBlock(templateId: string, user: User, name: string) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function addBlock(templateId: string, member: Member, name: string) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const blocks = await prisma.oneOnOneBlock.findMany({ where: { templateId } });
   const endBlock = blocks.find((b) => b.blockType === 'END');
@@ -278,10 +295,10 @@ export async function addBlock(templateId: string, user: User, name: string) {
 export async function updateBlock(
   templateId: string,
   blockId: string,
-  user: User,
+  member: Member,
   input: { name?: string; title?: string; body?: string },
 ) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   await getBlockOr404(templateId, blockId);
   return prisma.oneOnOneBlock.update({
@@ -290,8 +307,8 @@ export async function updateBlock(
   });
 }
 
-export async function deleteBlock(templateId: string, blockId: string, user: User) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function deleteBlock(templateId: string, blockId: string, member: Member) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const block = await getBlockOr404(templateId, blockId);
   if (block.blockType !== 'QUESTIONS') {
@@ -310,8 +327,8 @@ export async function deleteBlock(templateId: string, blockId: string, user: Use
   await prisma.oneOnOneBlock.delete({ where: { id: blockId } });
 }
 
-export async function reorderBlocks(templateId: string, user: User, blockIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function reorderBlocks(templateId: string, member: Member, blockIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const blocks = await prisma.oneOnOneBlock.findMany({ where: { templateId } });
   const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
@@ -349,8 +366,8 @@ async function countAnswersForQuestion(questionId: string): Promise<number> {
   return prisma.oneOnOneAnswer.count({ where: { questionId } });
 }
 
-export async function addQuestion(templateId: string, blockId: string, user: User, input: QuestionInput) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function addQuestion(templateId: string, blockId: string, member: Member, input: QuestionInput) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const block = await getBlockOr404(templateId, blockId);
   if (block.blockType !== 'QUESTIONS') {
@@ -381,10 +398,10 @@ export async function updateQuestion(
   templateId: string,
   blockId: string,
   questionId: string,
-  user: User,
+  member: Member,
   input: Partial<QuestionInput>,
 ) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
@@ -423,8 +440,8 @@ export async function updateQuestion(
   });
 }
 
-export async function deleteQuestion(templateId: string, blockId: string, questionId: string, user: User) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function deleteQuestion(templateId: string, blockId: string, questionId: string, member: Member) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, blockId } });
   if (!question) {
@@ -437,8 +454,8 @@ export async function deleteQuestion(templateId: string, blockId: string, questi
   await prisma.oneOnOneQuestion.delete({ where: { id: questionId } });
 }
 
-export async function reorderQuestions(templateId: string, blockId: string, user: User, questionIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function reorderQuestions(templateId: string, blockId: string, member: Member, questionIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
   await getBlockOr404(templateId, blockId);
   const existing = await prisma.oneOnOneQuestion.findMany({ where: { blockId }, select: { id: true } });
@@ -456,45 +473,45 @@ export async function reorderQuestions(templateId: string, blockId: string, user
 
 // ===== Recipients =====
 
-function assertNoSelfRecipient(template: { createdById: string }, userIds: string[]) {
-  if (userIds.includes(template.createdById)) {
+function assertNoSelfRecipient(template: { createdById: string }, memberIds: string[]) {
+  if (memberIds.includes(template.createdById)) {
     throw new ValidationError('A 1:1 template cannot include its own creator as a recipient.');
   }
 }
 
-export async function setRecipients(templateId: string, user: User, userIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
-  assertNoSelfRecipient(template, userIds);
+export async function setRecipients(templateId: string, member: Member, memberIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
+  assertNoSelfRecipient(template, memberIds);
   await prisma.$transaction([
-    prisma.oneOnOneRecipient.deleteMany({ where: { templateId, userId: { notIn: userIds } } }),
-    ...userIds.map((userId) =>
+    prisma.oneOnOneRecipient.deleteMany({ where: { templateId, memberId: { notIn: memberIds } } }),
+    ...memberIds.map((memberId) =>
       prisma.oneOnOneRecipient.upsert({
-        where: { templateId_userId: { templateId, userId } },
-        create: { templateId, userId },
+        where: { templateId_memberId: { templateId, memberId } },
+        create: { templateId, memberId },
         update: {},
       }),
     ),
   ]);
 }
 
-export async function addRecipients(templateId: string, user: User, userIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
-  assertNoSelfRecipient(template, userIds);
+export async function addRecipients(templateId: string, member: Member, memberIds: string[]) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
+  assertNoSelfRecipient(template, memberIds);
   await prisma.$transaction(
-    userIds.map((userId) =>
+    memberIds.map((memberId) =>
       prisma.oneOnOneRecipient.upsert({
-        where: { templateId_userId: { templateId, userId } },
-        create: { templateId, userId },
+        where: { templateId_memberId: { templateId, memberId } },
+        create: { templateId, memberId },
         update: {},
       }),
     ),
   );
 }
 
-export async function removeRecipient(templateId: string, targetUserId: string, user: User) {
-  await assertTemplateOwnerOrAdmin(templateId, user);
+export async function removeRecipient(templateId: string, targetMemberId: string, member: Member) {
+  await assertTemplateOwnerOrAdmin(templateId, member);
   await prisma.oneOnOneRecipient
-    .delete({ where: { templateId_userId: { templateId, userId: targetUserId } } })
+    .delete({ where: { templateId_memberId: { templateId, memberId: targetMemberId } } })
     .catch(() => {
       throw new NotFoundError('Recipient not found');
     });
@@ -502,8 +519,8 @@ export async function removeRecipient(templateId: string, targetUserId: string, 
 
 // ===== Runs (creator side) =====
 
-export async function startRun(templateId: string, user: User, recipientUserId: string) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, user);
+export async function startRun(templateId: string, member: Member, recipientMemberId: string) {
+  const template = await assertTemplateOwnerOrAdmin(templateId, member);
   if (template.isTemplate || template.status !== 'PUBLISHED') {
     throw new ConflictError(
       'TEMPLATE_NOT_PUBLISHED',
@@ -511,30 +528,30 @@ export async function startRun(templateId: string, user: User, recipientUserId: 
     );
   }
   const recipient = await prisma.oneOnOneRecipient.findUnique({
-    where: { templateId_userId: { templateId, userId: recipientUserId } },
+    where: { templateId_memberId: { templateId, memberId: recipientMemberId } },
   });
   if (!recipient) {
-    throw new ValidationError('That user is not a recipient of this template');
+    throw new ValidationError('That member is not a recipient of this template');
   }
   const run = await prisma.oneOnOneRun.create({
-    data: { templateId, respondentUserId: recipientUserId, initiatedById: user.id },
+    data: { templateId, respondentMemberId: recipientMemberId, initiatedById: member.id },
   });
   await recordAuditLog({
-    actorId: user.id,
+    actorId: member.id,
     action: 'ONE_ON_ONE_RUN_STARTED',
     targetType: 'OneOnOneRun',
     targetId: run.id,
-    metadata: { templateId, recipientUserId },
+    metadata: { templateId, recipientMemberId },
   });
   return run;
 }
 
-export async function listRuns(templateId: string, user: User, recipientUserId?: string) {
-  await assertTemplateOwnerOrAdmin(templateId, user);
+export async function listRuns(templateId: string, member: Member, recipientMemberId?: string) {
+  await assertCanAuditTemplate(templateId, member);
   return prisma.oneOnOneRun.findMany({
-    where: { templateId, respondentUserId: recipientUserId },
+    where: { templateId, respondentMemberId: recipientMemberId },
     orderBy: { createdAt: 'desc' },
-    include: { respondentUser: { select: { id: true, name: true, email: true } } },
+    include: { respondentMember: { select: { id: true, name: true, email: true } } },
   });
 }
 
@@ -558,30 +575,30 @@ interface TextPoint {
   text: string | null;
 }
 
-export async function getTrend(templateId: string, user: User, recipientUserId: string) {
-  const isSelf = recipientUserId === user.id;
+export async function getTrend(templateId: string, member: Member, recipientMemberId: string) {
+  const isSelf = recipientMemberId === member.id;
   if (isSelf) {
     // Recipients may view their own trend across runs without owning the template —
     // but only if they actually have run history with it, so this can't be used to
     // browse an arbitrary template's question list.
-    const hasRun = await prisma.oneOnOneRun.findFirst({ where: { templateId, respondentUserId: recipientUserId } });
+    const hasRun = await prisma.oneOnOneRun.findFirst({ where: { templateId, respondentMemberId: recipientMemberId } });
     if (!hasRun) {
       throw new NotFoundError('No one-on-one history found for this template');
     }
   } else {
-    await assertTemplateOwnerOrAdmin(templateId, user);
+    await assertCanAuditTemplate(templateId, member);
   }
 
   const [template, recipient, questions, runs] = await Promise.all([
     prisma.oneOnOneTemplate.findUniqueOrThrow({ where: { id: templateId }, select: { title: true } }),
-    prisma.user.findUniqueOrThrow({ where: { id: recipientUserId }, select: { id: true, name: true } }),
+    prisma.member.findUniqueOrThrow({ where: { id: recipientMemberId }, select: { id: true, name: true } }),
     prisma.oneOnOneQuestion.findMany({
       where: { templateId },
       orderBy: [{ block: { position: 'asc' } }, { position: 'asc' }],
       include: { options: { orderBy: { position: 'asc' } } },
     }),
     prisma.oneOnOneRun.findMany({
-      where: { templateId, respondentUserId: recipientUserId, status: 'COMPLETED' },
+      where: { templateId, respondentMemberId: recipientMemberId, status: 'COMPLETED' },
       orderBy: { submittedAt: 'asc' },
       include: { answers: { include: { selectedOptions: true } } },
     }),
@@ -700,27 +717,27 @@ async function validateAnswers(templateId: string, answers: AnswerInput[]) {
   }
 }
 
-export async function getMyRuns(user: User) {
+export async function getMyRuns(member: Member) {
   return prisma.oneOnOneRun.findMany({
-    where: { respondentUserId: user.id },
+    where: { respondentMemberId: member.id },
     orderBy: { createdAt: 'desc' },
     include: { template: { select: { id: true, title: true, description: true } } },
   });
 }
 
-async function getRunForRespondent(runId: string, user: User) {
+async function getRunForRespondent(runId: string, member: Member) {
   const run = await prisma.oneOnOneRun.findUnique({ where: { id: runId } });
   if (!run) {
     throw new NotFoundError('One-on-one run not found');
   }
-  if (run.respondentUserId !== user.id) {
+  if (run.respondentMemberId !== member.id) {
     throw new ForbiddenError('This one-on-one run was not assigned to you');
   }
   return run;
 }
 
-export async function getTakeRun(runId: string, user: User) {
-  const run = await getRunForRespondent(runId, user);
+export async function getTakeRun(runId: string, member: Member) {
+  const run = await getRunForRespondent(runId, member);
   const template = await getTemplateOr404(run.templateId);
   const blocks = await prisma.oneOnOneBlock.findMany({
     where: { templateId: run.templateId },
@@ -768,8 +785,8 @@ export async function getTakeRun(runId: string, user: User) {
   };
 }
 
-export async function submitRun(runId: string, user: User, answers: AnswerInput[]) {
-  const run = await getRunForRespondent(runId, user);
+export async function submitRun(runId: string, member: Member, answers: AnswerInput[]) {
+  const run = await getRunForRespondent(runId, member);
   if (run.status !== 'PENDING') {
     throw new ConflictError('RUN_ALREADY_SUBMITTED', 'This one-on-one has already been submitted and cannot be changed.');
   }

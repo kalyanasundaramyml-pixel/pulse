@@ -7,10 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
+enum MemberRole {
   ADMIN
   CREATOR
-  USER
+  AUDITOR
+  MEMBER
 }
 
 enum SurveyStatus {
@@ -42,12 +43,14 @@ enum OneOnOneStatus {
   PUBLISHED
 }
 
-model User {
+model Member {
   id                  String    @id @default(uuid())
   name                String
   email               String    @unique
   passwordHash        String    @map("password_hash")
-  role                UserRole  @default(USER)
+  role                MemberRole  @default(MEMBER)
+  groupId             String    @map("group_id")
+  group               Group     @relation(fields: [groupId], references: [id])
   mustChangePassword  Boolean   @default(true) @map("must_change_password")
   isActive            Boolean   @default(true) @map("is_active")
   lastLoginAt         DateTime? @map("last_login_at")
@@ -58,41 +61,60 @@ model User {
   surveyRecipients     SurveyRecipient[]
   attributedResponses  AttributedResponse[]
   responseAccess       SurveyResponseAccess[]
-  importBatches        UserImportBatch[]
+  importBatches        MemberImportBatch[]
   auditLogs            AuditLog[]
-  createdGroups        Group[]
-  groupMemberships     GroupMember[]
+  createdCircles       Circle[]
+  circleMemberships    CircleMember[]
+
+  surveyViewerGrants       SurveyViewer[]
+  surveyViewerGrantsIssued SurveyViewer[]      @relation("SurveyViewerGrantedBy")
 
   createdOneOnOneTemplates OneOnOneTemplate[]
   oneOnOneRecipientOf      OneOnOneRecipient[]
   oneOnOneRunsAsRespondent OneOnOneRun[]       @relation("OneOnOneRespondent")
   oneOnOneRunsInitiated    OneOnOneRun[]       @relation("OneOnOneInitiator")
 
-  @@map("users")
+  @@index([groupId])
+  @@map("members")
 }
 
+// An org team. Every member belongs to exactly one Group (a scalar FK, not a
+// join table, so "one group at a time" is structural). Distinct from Circle,
+// which is an ad-hoc, cross-group recipient list.
 model Group {
-  id          String        @id @default(uuid())
-  name        String
-  createdById String        @map("created_by")
-  createdBy   User          @relation(fields: [createdById], references: [id])
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  members     GroupMember[]
+  id        String   @id @default(uuid())
+  name      String   @unique
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members Member[]
 
   @@map("groups")
 }
 
-model GroupMember {
+model Circle {
+  id          String        @id @default(uuid())
+  name        String
+  createdById String        @map("created_by")
+  createdBy   Member        @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  members     CircleMember[]
+
+  @@map("circles")
+}
+
+model CircleMember {
   id        String   @id @default(uuid())
-  groupId   String   @map("group_id")
-  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  circleId  String   @map("circle_id")
+  circle    Circle   @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  memberId  String   @map("member_id")
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([groupId, userId])
-  @@map("group_members")
+  @@unique([circleId, memberId])
+  @@map("circle_members")
 }
 
 model Survey {
@@ -102,7 +124,7 @@ model Survey {
   isAnonymous  Boolean       @map("is_anonymous")
   status       SurveyStatus  @default(DRAFT)
   createdById  String        @map("created_by")
-  createdBy    User          @relation("SurveyCreatedBy", fields: [createdById], references: [id])
+  createdBy    Member        @relation("SurveyCreatedBy", fields: [createdById], references: [id])
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
   publishedAt  DateTime?     @map("published_at")
@@ -117,6 +139,7 @@ model Survey {
   anonymousResponses  AnonymousResponse[]
   attributedResponses AttributedResponse[]
   responseAccess      SurveyResponseAccess[]
+  viewers             SurveyViewer[]
 
   // A creator can never have two surveys/templates sharing the same title —
   // including two drafts — so names stay unambiguous in their own lists.
@@ -189,8 +212,8 @@ model SurveyRecipient {
   id         String   @id @default(uuid())
   surveyId   String   @map("survey_id")
   survey     Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberId   String   @map("member_id")
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now()) @map("created_at")
 
   // Set by the creator to grant this one recipient a single further
@@ -198,12 +221,30 @@ model SurveyRecipient {
   // or resubmit). Consumed — reset back to false — the moment they use it.
   resubmitAllowed Boolean @default(false) @map("resubmit_allowed")
 
-  @@unique([surveyId, userId])
-  @@index([userId])
+  @@unique([surveyId, memberId])
+  @@index([memberId])
   @@map("survey_recipients")
 }
 
-// ===== ANONYMOUS response path: intentionally carries NO user reference =====
+// Grants one member/creator outside the survey's own oversight (see Group)
+// a narrow exception to view its dashboard/results. Only an Auditor (of the
+// survey's owning group) or an Admin may grant/revoke this — never the
+// survey's own creator. Applicable to surveys only, any status.
+model SurveyViewer {
+  id          String   @id @default(uuid())
+  surveyId    String   @map("survey_id")
+  survey      Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  memberId    String   @map("member_id")
+  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  grantedById String   @map("granted_by")
+  grantedBy   Member   @relation("SurveyViewerGrantedBy", fields: [grantedById], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([surveyId, memberId])
+  @@map("survey_viewers")
+}
+
+// ===== ANONYMOUS response path: intentionally carries NO member reference =====
 
 model AnonymousResponse {
   id           String   @id @default(uuid())
@@ -255,13 +296,13 @@ model SurveyResponseAccess {
   id          String            @id @default(uuid())
   surveyId    String            @map("survey_id")
   survey      Survey            @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  userId      String            @map("user_id")
-  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberId    String            @map("member_id")
+  member      Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)
   responseId  String            @unique @map("response_id")
   response    AnonymousResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
   createdAt   DateTime          @default(now()) @map("created_at")
 
-  @@unique([surveyId, userId])
+  @@unique([surveyId, memberId])
   @@map("survey_response_access")
 }
 
@@ -271,14 +312,14 @@ model AttributedResponse {
   id                 String   @id @default(uuid())
   surveyId           String   @map("survey_id")
   survey             Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
-  respondentUserId   String   @map("respondent_user_id")
-  respondentUser     User     @relation(fields: [respondentUserId], references: [id])
+  respondentMemberId String   @map("respondent_member_id")
+  respondentMember   Member   @relation(fields: [respondentMemberId], references: [id])
   submittedAt        DateTime @default(now()) @map("submitted_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   answers  AttributedAnswer[]
 
-  @@unique([surveyId, respondentUserId])
+  @@unique([surveyId, respondentMemberId])
   @@index([surveyId])
   @@map("attributed_responses")
 }
@@ -313,36 +354,36 @@ model AttributedAnswerOption {
 
 // ===== Admin / ops support =====
 
-model UserImportBatch {
+model MemberImportBatch {
   id            String   @id @default(uuid())
   importedById  String   @map("imported_by")
-  importedBy    User     @relation(fields: [importedById], references: [id])
+  importedBy    Member   @relation(fields: [importedById], references: [id])
   filename      String?
   totalRows     Int      @map("total_rows")
   successCount  Int      @map("success_count")
   errorCount    Int      @map("error_count")
   createdAt     DateTime @default(now()) @map("created_at")
 
-  rowErrors  UserImportRowError[]
+  rowErrors  MemberImportRowError[]
 
-  @@map("user_import_batches")
+  @@map("member_import_batches")
 }
 
-model UserImportRowError {
+model MemberImportRowError {
   id         String           @id @default(uuid())
   batchId    String           @map("batch_id")
-  batch      UserImportBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batch      MemberImportBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
   rowNumber  Int              @map("row_number")
   rawRow     Json             @map("raw_row")
   message    String
 
-  @@map("user_import_row_errors")
+  @@map("member_import_row_errors")
 }
 
 model AuditLog {
   id          String   @id @default(uuid())
   actorId     String?  @map("actor_id")
-  actor       User?    @relation(fields: [actorId], references: [id])
+  actor       Member?  @relation(fields: [actorId], references: [id])
   action      String
   targetType  String   @map("target_type")
   targetId    String?  @map("target_id")
@@ -362,7 +403,7 @@ model OneOnOneTemplate {
   title       String
   description String?
   createdById String         @map("created_by")
-  createdBy   User           @relation(fields: [createdById], references: [id])
+  createdBy   Member         @relation(fields: [createdById], references: [id])
   isArchived  Boolean        @default(false) @map("is_archived")
   isPublic    Boolean        @default(false) @map("is_public")
   // isTemplate:true = a reusable template (never runs directly). false = a
@@ -442,31 +483,31 @@ model OneOnOneRecipient {
   id         String   @id @default(uuid())
   templateId String   @map("template_id")
   template   OneOnOneTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  userId     String   @map("user_id")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memberId   String   @map("member_id")
+  member     Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now()) @map("created_at")
 
-  @@unique([templateId, userId])
+  @@unique([templateId, memberId])
   @@map("one_on_one_recipients")
 }
 
 model OneOnOneRun {
-  id               String            @id @default(uuid())
-  templateId       String            @map("template_id")
-  template         OneOnOneTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  respondentUserId String            @map("respondent_user_id")
-  respondentUser   User              @relation("OneOnOneRespondent", fields: [respondentUserId], references: [id])
-  initiatedById    String            @map("initiated_by")
-  initiatedBy      User              @relation("OneOnOneInitiator", fields: [initiatedById], references: [id])
-  status           OneOnOneRunStatus @default(PENDING)
-  createdAt        DateTime          @default(now()) @map("created_at")
-  submittedAt      DateTime?         @map("submitted_at")
+  id                 String            @id @default(uuid())
+  templateId         String            @map("template_id")
+  template           OneOnOneTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  respondentMemberId String            @map("respondent_member_id")
+  respondentMember   Member            @relation("OneOnOneRespondent", fields: [respondentMemberId], references: [id])
+  initiatedById      String            @map("initiated_by")
+  initiatedBy        Member            @relation("OneOnOneInitiator", fields: [initiatedById], references: [id])
+  status             OneOnOneRunStatus @default(PENDING)
+  createdAt          DateTime          @default(now()) @map("created_at")
+  submittedAt        DateTime?         @map("submitted_at")
 
   answers OneOnOneAnswer[]
 
-  // Deliberately NO unique([templateId, respondentUserId]) — many runs per
+  // Deliberately NO unique([templateId, respondentMemberId]) — many runs per
   // person over time is the entire point.
-  @@index([templateId, respondentUserId])
+  @@index([templateId, respondentMemberId])
   @@map("one_on_one_runs")
 }
 

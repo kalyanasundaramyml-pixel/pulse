@@ -8,10 +8,11 @@ import { env } from './config/env';
 import { SESSION_MAX_AGE_MS } from './config/constants';
 import { errorHandler } from './middleware/errorHandler';
 import { authRouter } from './modules/auth/auth.routes';
-import { usersRouter } from './modules/users/users.routes';
+import { membersRouter } from './modules/members/members.routes';
 import { surveysRouter } from './modules/surveys/surveys.routes';
 import { responsesRouter } from './modules/responses/responses.routes';
 import { dashboardRouter } from './modules/dashboard/dashboard.routes';
+import { circlesRouter } from './modules/circles/circles.routes';
 import { groupsRouter } from './modules/groups/groups.routes';
 import { oneOnOnesRouter } from './modules/oneOnOnes/oneOnOnes.routes';
 
@@ -20,6 +21,11 @@ const sessionPool = new Pool({ connectionString: env.DATABASE_URL });
 
 export function createApp() {
   const app = express();
+
+  // Exactly one hop: the nginx container in front of this API in
+  // docker-compose. Needed so express-rate-limit can trust the
+  // X-Forwarded-For header it sets instead of erroring on it.
+  app.set('trust proxy', 1);
 
   app.use(helmet());
   app.use(
@@ -51,11 +57,12 @@ export function createApp() {
   });
 
   app.use('/api/auth', authRouter);
-  app.use('/api', usersRouter);
+  app.use('/api', membersRouter);
   app.use('/api/surveys', surveysRouter);
   app.use('/api/surveys', responsesRouter);
   app.use('/api/surveys', dashboardRouter);
-  app.use('/api/groups', groupsRouter);
+  app.use('/api/circles', circlesRouter);
+  app.use('/api/admin/groups', groupsRouter);
   app.use('/api/one-on-ones', oneOnOnesRouter);
 
   app.use(errorHandler);

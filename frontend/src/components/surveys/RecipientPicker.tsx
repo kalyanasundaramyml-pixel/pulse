@@ -1,42 +1,42 @@
 import { useEffect, useState } from 'react';
-import { usersApi } from '../../api/users';
-import { groupsApi } from '../../api/groups';
-import { DirectoryUser, GroupSummary } from '../../types/api';
+import { membersApi } from '../../api/members';
+import { circlesApi } from '../../api/circles';
+import { DirectoryMember, CircleSummary } from '../../types/api';
 
 export function RecipientPicker({
   selected,
   onChange,
-  excludeUserId,
+  excludeMemberId,
 }: {
-  selected: DirectoryUser[];
-  onChange: (selected: DirectoryUser[]) => void;
-  excludeUserId?: string;
+  selected: DirectoryMember[];
+  onChange: (selected: DirectoryMember[]) => void;
+  excludeMemberId?: string;
 }) {
   const [search, setSearch] = useState('');
-  const [results, setResults] = useState<DirectoryUser[]>([]);
+  const [results, setResults] = useState<DirectoryMember[]>([]);
   const [loading, setLoading] = useState(false);
-  const [groups, setGroups] = useState<GroupSummary[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  const [addingGroup, setAddingGroup] = useState(false);
-  const [groupError, setGroupError] = useState<string | null>(null);
+  const [circles, setCircles] = useState<CircleSummary[]>([]);
+  const [selectedCircleId, setSelectedCircleId] = useState('');
+  const [addingCircle, setAddingCircle] = useState(false);
+  const [circleError, setCircleError] = useState<string | null>(null);
 
   useEffect(() => {
-    groupsApi.list().then((res) => setGroups(res.groups));
+    circlesApi.list().then((res) => setCircles(res.circles));
   }, []);
 
-  async function addGroupMembers() {
-    if (!selectedGroupId) return;
-    setGroupError(null);
-    setAddingGroup(true);
+  async function addCircleMembers() {
+    if (!selectedCircleId) return;
+    setCircleError(null);
+    setAddingCircle(true);
     try {
-      const { group } = await groupsApi.get(selectedGroupId);
+      const { circle } = await circlesApi.get(selectedCircleId);
       const currentIds = new Set(selected.map((u) => u.id));
-      const toAdd = group.members.filter((m) => !currentIds.has(m.id) && m.id !== excludeUserId);
+      const toAdd = circle.members.filter((m) => !currentIds.has(m.id) && m.id !== excludeMemberId);
       onChange([...selected, ...toAdd]);
     } catch {
-      setGroupError('Failed to load group members');
+      setCircleError('Failed to load circle members');
     } finally {
-      setAddingGroup(false);
+      setAddingCircle(false);
     }
   }
 
@@ -45,8 +45,8 @@ export function RecipientPicker({
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await usersApi.directory(search || undefined);
-        if (!cancelled) setResults(res.users);
+        const res = await membersApi.directory(search || undefined);
+        if (!cancelled) setResults(res.members);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -59,34 +59,34 @@ export function RecipientPicker({
 
   const selectedIds = new Set(selected.map((u) => u.id));
 
-  function add(user: DirectoryUser) {
-    if (!selectedIds.has(user.id)) {
-      onChange([...selected, user]);
+  function add(member: DirectoryMember) {
+    if (!selectedIds.has(member.id)) {
+      onChange([...selected, member]);
     }
   }
 
-  function remove(userId: string) {
-    onChange(selected.filter((u) => u.id !== userId));
+  function remove(memberId: string) {
+    onChange(selected.filter((u) => u.id !== memberId));
   }
 
   return (
     <div className="recipient-picker">
-      {groups.length > 0 && (
-        <div className="group-add-row">
-          <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)}>
-            <option value="">Add everyone from a group...</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name} ({g.memberCount})
+      {circles.length > 0 && (
+        <div className="circle-add-row">
+          <select value={selectedCircleId} onChange={(e) => setSelectedCircleId(e.target.value)}>
+            <option value="">Add everyone from a circle...</option>
+            {circles.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.memberCount})
               </option>
             ))}
           </select>
-          <button type="button" onClick={addGroupMembers} disabled={!selectedGroupId || addingGroup}>
-            {addingGroup ? 'Adding...' : "Add group's members"}
+          <button type="button" onClick={addCircleMembers} disabled={!selectedCircleId || addingCircle}>
+            {addingCircle ? 'Adding...' : "Add circle's members"}
           </button>
         </div>
       )}
-      {groupError && <p className="form-error">{groupError}</p>}
+      {circleError && <p className="form-error">{circleError}</p>}
       <input
         placeholder="Search people by name or email"
         value={search}
@@ -95,7 +95,7 @@ export function RecipientPicker({
       {loading && <p className="muted">Searching...</p>}
       <ul className="picker-results">
         {results
-          .filter((u) => !selectedIds.has(u.id) && u.id !== excludeUserId)
+          .filter((u) => !selectedIds.has(u.id) && u.id !== excludeMemberId)
           .map((u) => (
             <li key={u.id}>
               <span>

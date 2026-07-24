@@ -1,74 +1,66 @@
-import { User } from '@prisma/client';
 import { prisma } from '../../db/prisma';
-import { NotFoundError } from '../../lib/errors';
+import { ConflictError, NotFoundError } from '../../lib/errors';
+import { recordAuditLog } from '../../lib/auditLog';
 
-// Groups are a shared, org-wide resource: any Creator/Admin can create, view,
-// edit, or delete any group — there is no per-group ownership lock beyond
-// recording createdById for audit purposes.
+// Groups are org teams: every member belongs to exactly one. Admin-only
+// end to end — unlike Circles, there's no reason for a Creator to see or
+// manage these directly.
 
 export async function listGroups() {
   const groups = await prisma.group.findMany({
     orderBy: { name: 'asc' },
     include: { _count: { select: { members: true } } },
   });
-  return groups.map((g) => ({ id: g.id, name: g.name, memberCount: g._count.members, createdAt: g.createdAt }));
+  return groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    isDefault: g.isDefault,
+    memberCount: g._count.members,
+    createdAt: g.createdAt,
+  }));
 }
 
-export async function getGroup(groupId: string) {
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
-    include: { members: { include: { user: { select: { id: true, name: true, email: true } } } } },
-  });
-  if (!group) {
-    throw new NotFoundError('Group not found');
+export async function createGroup(name: string, actorId: string) {
+  const existing = await prisma.group.findUnique({ where: { name } });
+  if (existing) {
+    throw new ConflictError('DUPLICATE_NAME', `A group named "${name}" already exists.`);
   }
-  return {
-    id: group.id,
-    name: group.name,
-    members: group.members.map((m) => m.user),
-  };
+  const group = await prisma.group.create({ data: { name } });
+  await recordAuditLog({ actorId, action: 'GROUP_CREATED', targetType: 'Group', targetId: group.id, metadata: { name } });
+  return group;
 }
 
-export async function createGroup(user: User, input: { name: string; userIds: string[] }) {
-  const group = await prisma.group.create({
-    data: {
-      name: input.name,
-      createdById: user.id,
-      members: { create: input.userIds.map((userId) => ({ userId })) },
-    },
-  });
-  return getGroup(group.id);
-}
-
-export async function updateGroup(groupId: string, input: { name?: string; userIds?: string[] }) {
+export async function renameGroup(groupId: string, name: string, actorId: string) {
   const existing = await prisma.group.findUnique({ where: { id: groupId } });
   if (!existing) {
     throw new NotFoundError('Group not found');
   }
-
-  await prisma.$transaction(async (tx) => {
-    if (input.name !== undefined) {
-      await tx.group.update({ where: { id: groupId }, data: { name: input.name } });
-    }
-    if (input.userIds !== undefined) {
-      await tx.groupMember.deleteMany({ where: { groupId, userId: { notIn: input.userIds } } });
-      for (const userId of input.userIds) {
-        await tx.groupMember.upsert({
-          where: { groupId_userId: { groupId, userId } },
-          create: { groupId, userId },
-          update: {},
-        });
-      }
-    }
+  const nameTaken = await prisma.group.findFirst({ where: { name, id: { not: groupId } } });
+  if (nameTaken) {
+    throw new ConflictError('DUPLICATE_NAME', `A group named "${name}" already exists.`);
+  }
+  const updated = await prisma.group.update({ where: { id: groupId }, data: { name } });
+  await recordAuditLog({
+    actorId,
+    action: 'GROUP_RENAMED',
+    targetType: 'Group',
+    targetId: groupId,
+    metadata: { from: existing.name, to: name },
   });
-
-  return getGroup(groupId);
+  return updated;
 }
 
-export async function deleteGroup(groupId: string) {
-  const existing = await prisma.group.findUnique({ where: { id: groupId } });
+export async function deleteGroup(groupId: string, actorId: string) {
+  const existing = await prisma.group.findUnique({ where: { id: groupId }, include: { _count: { select: { members: true } } } });
   if (!existing) {
     throw new NotFoundError('Group not found');
+  }
+  if (existing.isDefault) {
+    throw new ConflictError('DEFAULT_GROUP', 'The default group cannot be deleted');
+  }
+  if (existing._count.members > 0) {
+    throw new ConflictError('GROUP_HAS_MEMBERS', 'Reassign every member out of this group before deleting it');
   }
   await prisma.group.delete({ where: { id: groupId } });
+  await recordAuditLog({ actorId, action: 'GROUP_DELETED', targetType: 'Group', targetId: groupId, metadata: { name: existing.name } });
 }

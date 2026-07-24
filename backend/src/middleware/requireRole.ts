@@ -1,14 +1,14 @@
 import { RequestHandler } from 'express';
-import { UserRole } from '@prisma/client';
+import { MemberRole } from '@prisma/client';
 import { ForbiddenError, UnauthorizedError } from '../lib/errors';
 
-export function requireRole(...roles: UserRole[]): RequestHandler {
+export function requireRole(...roles: MemberRole[]): RequestHandler {
   return (req, _res, next) => {
-    if (!req.user) {
+    if (!req.member) {
       next(new UnauthorizedError());
       return;
     }
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes(req.member.role)) {
       next(new ForbiddenError(`Requires one of roles: ${roles.join(', ')}`));
       return;
     }

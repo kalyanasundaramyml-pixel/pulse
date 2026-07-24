@@ -8,26 +8,26 @@ import { TextResponseList } from '../../components/dashboard/TextResponseList';
 import { useAuth } from '../../hooks/useAuth';
 
 export function OneOnOneTrendPage() {
-  const { id, userId } = useParams<{ id: string; userId: string }>();
-  const { user } = useAuth();
+  const { id, memberId } = useParams<{ id: string; memberId: string }>();
+  const { member } = useAuth();
   const [trend, setTrend] = useState<OneOnOneTrendResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id || !userId) return;
+    if (!id || !memberId) return;
     oneOnOnesApi
-      .getTrend(id, userId)
+      .getTrend(id, memberId)
       .then(setTrend)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load trend'))
       .finally(() => setLoading(false));
-  }, [id, userId]);
+  }, [id, memberId]);
 
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="form-error">{error}</p>;
   if (!trend) return null;
 
-  const isSelf = trend.recipient.id === user?.id;
+  const isSelf = trend.recipient.id === member?.id;
 
   return (
     <div className="page">

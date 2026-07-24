@@ -1,40 +1,40 @@
 import { prisma } from '../../db/prisma';
 import { hashPassword, verifyPassword } from '../../lib/password';
 import { UnauthorizedError, ValidationError } from '../../lib/errors';
-import { User } from '@prisma/client';
+import { Member } from '@prisma/client';
 
-export async function authenticate(email: string, password: string): Promise<User> {
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-  if (!user || !user.isActive) {
+export async function authenticate(email: string, password: string): Promise<Member> {
+  const member = await prisma.member.findUnique({ where: { email: email.toLowerCase() } });
+  if (!member || !member.isActive) {
     throw new UnauthorizedError('Invalid email or password');
   }
-  const ok = await verifyPassword(password, user.passwordHash);
+  const ok = await verifyPassword(password, member.passwordHash);
   if (!ok) {
     throw new UnauthorizedError('Invalid email or password');
   }
-  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-  return user;
+  await prisma.member.update({ where: { id: member.id }, data: { lastLoginAt: new Date() } });
+  return member;
 }
 
-export async function changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-  const ok = await verifyPassword(currentPassword, user.passwordHash);
+export async function changePassword(memberId: string, currentPassword: string, newPassword: string): Promise<void> {
+  const member = await prisma.member.findUniqueOrThrow({ where: { id: memberId } });
+  const ok = await verifyPassword(currentPassword, member.passwordHash);
   if (!ok) {
     throw new ValidationError('Current password is incorrect');
   }
   const passwordHash = await hashPassword(newPassword);
-  await prisma.user.update({
-    where: { id: userId },
+  await prisma.member.update({
+    where: { id: memberId },
     data: { passwordHash, mustChangePassword: false },
   });
 }
 
-export function toPublicUser(user: User) {
+export function toPublicMember(member: Member) {
   return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    mustChangePassword: user.mustChangePassword,
+    id: member.id,
+    name: member.name,
+    email: member.email,
+    role: member.role,
+    mustChangePassword: member.mustChangePassword,
   };
 }

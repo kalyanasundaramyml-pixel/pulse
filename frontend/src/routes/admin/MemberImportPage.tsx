@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
-import { usersApi } from '../../api/users';
+import { membersApi } from '../../api/members';
 import { ImportResult } from '../../types/api';
 import { ApiError } from '../../api/client';
 
 function downloadCsv(result: ImportResult) {
   const header = 'name,email,role,tempPassword\n';
-  const rows = result.createdUsers
+  const rows = result.createdMembers
     .map((u) => `${u.name},${u.email},${u.role},${u.tempPassword}`)
     .join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv' });
@@ -17,19 +17,20 @@ function downloadCsv(result: ImportResult) {
   URL.revokeObjectURL(url);
 }
 
-const SAMPLE_CSV = 'name,email,role\nJane Smith,jane.smith@example.com,USER\nRaj Patel,raj.patel@example.com,CREATOR\n';
+const SAMPLE_CSV =
+  'name,email,role,group\nJane Smith,jane.smith@example.com,MEMBER,Engineering\nRaj Patel,raj.patel@example.com,CREATOR,\n';
 
 function downloadSampleCsv() {
   const blob = new Blob([SAMPLE_CSV], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'sample-users.csv';
+  a.download = 'sample-members.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
 
-export function UserImportPage() {
+export function MemberImportPage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function UserImportPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await usersApi.importCsv(file);
+      const res = await membersApi.importCsv(file);
       setResult(res);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Import failed');
@@ -56,13 +57,15 @@ export function UserImportPage() {
 
   return (
     <div className="page">
-      <h1>Import users from CSV</h1>
+      <h1>Import members from CSV</h1>
       <div className="import-result">
         <p>CSV format</p>
         <p>
-          One header row followed by one row per user: <code>name,email,role</code>. <code>role</code> is optional
-          and defaults to <code>USER</code> when omitted; accepted values are <code>ADMIN</code>, <code>CREATOR</code>,
-          or <code>USER</code> (case-insensitive).
+          One header row followed by one row per member: <code>name,email,role,group</code>. <code>role</code> is
+          optional and defaults to <code>MEMBER</code> when omitted; accepted values are <code>ADMIN</code>,{' '}
+          <code>CREATOR</code>, <code>AUDITOR</code>, or <code>MEMBER</code> (case-insensitive). <code>group</code> is
+          also optional and defaults to the org's default group; if given, it must match an existing group's name
+          (case-insensitive).
         </p>
         <p>Example:</p>
         <pre className="temp-password" style={{ display: 'block', whiteSpace: 'pre', padding: '10px 12px' }}>
@@ -85,7 +88,7 @@ export function UserImportPage() {
             {result.successCount} of {result.totalRows} rows imported successfully. {result.errorCount} errors.
           </p>
           <p>
-            There is no email relay configured, so each new user got a random temporary password. Download it now
+            There is no email relay configured, so each new member got a random temporary password. Download it now
             and distribute it to the person &mdash; it will not be shown again.
           </p>
           <button onClick={() => downloadCsv(result)}>Download temp passwords CSV</button>

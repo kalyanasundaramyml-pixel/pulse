@@ -14,6 +14,7 @@ import {
   addRecipientsSchema,
   reopenSurveySchema,
   duplicateSurveySchema,
+  grantViewerSchema,
 } from './surveys.schemas';
 import { validate } from '../../middleware/validate';
 import { requireAuth } from '../../middleware/requireAuth';
@@ -47,5 +48,12 @@ surveysRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREATOR
 
 surveysRouter.put('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 surveysRouter.post('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);
-surveysRouter.delete('/:id/recipients/:userId', requireRole('CREATOR', 'ADMIN'), controller.removeRecipient);
-surveysRouter.post('/:id/recipients/:userId/reopen', requireRole('CREATOR', 'ADMIN'), controller.reopenForRecipient);
+surveysRouter.delete('/:id/recipients/:memberId', requireRole('CREATOR', 'ADMIN'), controller.removeRecipient);
+surveysRouter.post('/:id/recipients/:memberId/reopen', requireRole('CREATOR', 'ADMIN'), controller.reopenForRecipient);
+
+// Viewer grants — Admin or the Auditor of this survey's group only (enforced
+// in the service, not here, since a plain Creator/Auditor split can't be
+// expressed as a static role allow-list).
+surveysRouter.get('/:id/viewers', requireRole('AUDITOR', 'ADMIN'), controller.listViewers);
+surveysRouter.post('/:id/viewers', requireRole('AUDITOR', 'ADMIN'), validate(grantViewerSchema), controller.grantViewer);
+surveysRouter.delete('/:id/viewers/:memberId', requireRole('AUDITOR', 'ADMIN'), controller.revokeViewer);

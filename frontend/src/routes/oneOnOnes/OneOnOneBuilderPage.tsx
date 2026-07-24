@@ -13,7 +13,7 @@ import { useToast } from '../../components/common/ToastProvider';
 export function OneOnOneBuilderPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { member } = useAuth();
   const { showToast } = useToast();
   const { setIsTemplateActive } = useTemplateNav();
   const [searchParams] = useSearchParams();
@@ -218,14 +218,14 @@ export function OneOnOneBuilderPage() {
     }
   }
 
-  async function handleStartRun(userId: string) {
+  async function handleStartRun(memberId: string) {
     if (!id) return;
     setError(null);
     setRunStartedFor(null);
-    setStartingRunFor(userId);
+    setStartingRunFor(memberId);
     try {
-      await oneOnOnesApi.startRun(id, userId);
-      setRunStartedFor(userId);
+      await oneOnOnesApi.startRun(id, memberId);
+      setRunStartedFor(memberId);
       await loadTemplate(id);
       showToast('New 1:1 started');
     } catch (err) {
@@ -246,7 +246,8 @@ export function OneOnOneBuilderPage() {
   if (loading) return <p>Loading...</p>;
   if (!template) return <p className="form-error">{error ?? 'Template not found'}</p>;
 
-  const isOwner = user?.role === 'ADMIN' || template.createdById === user?.id;
+  const isOwner = member?.role === 'ADMIN' || template.createdById === member?.id;
+  const isAuditorViewer = member?.role === 'AUDITOR' && !isOwner;
   const hasUnsavedChanges =
     title !== template.title || description !== (template.description ?? '') || blocksDirty;
 
@@ -259,6 +260,67 @@ export function OneOnOneBuilderPage() {
       ← Back to {oneOnOneListViewLabel({ ...getOneOnOneListView(), tab: 'initiated' })}
     </Link>
   );
+
+  if (isAuditorViewer) {
+    return (
+      <div className="page builder-layout">
+        <div className="builder-main">
+          {backLink}
+          <div className="page-header">
+            <h1>{template.title}</h1>
+            <span className={`status-badge ${template.status.toLowerCase()}`}>{template.status}</span>
+          </div>
+          {template.description && <p>{template.description}</p>}
+          <p className="muted">Audit view — read-only oversight of a 1:1 created within your group.</p>
+
+          {error && <p className="form-error">{error}</p>}
+
+          <BlockList blocks={template.blocks} api={blockApi} editable={false} onChanged={() => {}} />
+
+          <section>
+            <h2>Recipients ({template.recipients.length})</h2>
+            {template.recipients.length === 0 ? (
+              <p className="empty-state">No recipients yet.</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Past runs</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {template.recipients.map((r) => (
+                    <tr key={r.member.id}>
+                      <td>
+                        {r.member.name} <span className="muted">{r.member.email}</span>
+                      </td>
+                      <td>{r.runCount}</td>
+                      <td className="actions">
+                        {r.runCount > 0 && (
+                          <Link to={`/one-on-ones/${id}/trend/${r.member.id}`} className="button">
+                            View trend
+                          </Link>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </div>
+        <BuilderPreviewPanel
+          title={template.title}
+          description={template.description}
+          blocks={template.blocks}
+          topNote={<p className="muted">This 1:1 is linked to your name and reviewed by your creator.</p>}
+          submitLabel="Submit"
+        />
+      </div>
+    );
+  }
 
   if (!isOwner) {
     return (
@@ -417,26 +479,26 @@ export function OneOnOneBuilderPage() {
             </thead>
             <tbody>
               {template.recipients.map((r) => (
-                <tr key={r.user.id}>
+                <tr key={r.member.id}>
                   <td>
-                    {r.user.name} <span className="muted">{r.user.email}</span>
+                    {r.member.name} <span className="muted">{r.member.email}</span>
                   </td>
                   <td>{r.runCount}</td>
                   <td className="actions">
                     {!template.isTemplate && template.status === 'PUBLISHED' && (
-                      <button onClick={() => handleStartRun(r.user.id)} disabled={startingRunFor === r.user.id}>
-                        {startingRunFor === r.user.id ? 'Starting...' : 'Start new 1:1'}
+                      <button onClick={() => handleStartRun(r.member.id)} disabled={startingRunFor === r.member.id}>
+                        {startingRunFor === r.member.id ? 'Starting...' : 'Start new 1:1'}
                       </button>
                     )}
                     {!template.isTemplate && template.status === 'DRAFT' && (
                       <span className="muted">Publish to start</span>
                     )}
                     {r.runCount > 0 && (
-                      <Link to={`/one-on-ones/${id}/trend/${r.user.id}`} className="button">
+                      <Link to={`/one-on-ones/${id}/trend/${r.member.id}`} className="button">
                         View trend
                       </Link>
                     )}
-                    {runStartedFor === r.user.id && <span className="muted">Started — they'll see it now.</span>}
+                    {runStartedFor === r.member.id && <span className="muted">Started — they'll see it now.</span>}
                   </td>
                 </tr>
               ))}

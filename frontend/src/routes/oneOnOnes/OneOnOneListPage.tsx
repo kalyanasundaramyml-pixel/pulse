@@ -46,11 +46,11 @@ function NewOneOnOneMenu() {
 }
 
 export function OneOnOneListPage() {
-  const { user } = useAuth();
+  const { member } = useAuth();
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab');
   const initialView = getOneOnOneListView();
-  const [tab, setTab] = useState<'assigned' | 'initiated'>(
+  const [tab, setTab] = useState<'assigned' | 'initiated' | 'audit'>(
     initialTab === 'initiated' || initialTab === 'assigned' ? initialTab : initialView.tab,
   );
   const [assignedFilter, setAssignedFilter] = useState<'todo' | 'completed'>(initialView.assignedFilter);
@@ -58,9 +58,11 @@ export function OneOnOneListPage() {
   const [sort, setSort] = useState<DateSortOption>('createdDesc');
   const [runs, setRuns] = useState<OneOnOneRun[]>([]);
   const [mine, setMine] = useState<OneOnOneTemplate[]>([]);
+  const [auditItems, setAuditItems] = useState<OneOnOneTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canManage = user?.role === 'CREATOR' || user?.role === 'ADMIN';
+  const canManage = member?.role === 'CREATOR' || member?.role === 'ADMIN';
+  const isAuditor = member?.role === 'AUDITOR';
 
   // Remembered so returning via the top-nav "One-on-Ones" link (rather than a
   // contextual back button) restores whatever tab/filter was last open.
@@ -69,8 +71,10 @@ export function OneOnOneListPage() {
   }, [tab, assignedFilter, initiatedFilter]);
 
   useEffect(() => {
-    if (!canManage && tab !== 'assigned') setTab('assigned');
-  }, [canManage, tab]);
+    if (!canManage && !isAuditor && tab !== 'assigned') setTab('assigned');
+    if (!canManage && tab === 'initiated') setTab('assigned');
+    if (!isAuditor && tab === 'audit') setTab('assigned');
+  }, [canManage, isAuditor, tab]);
 
   useEffect(() => {
     setLoading(true);
@@ -78,6 +82,11 @@ export function OneOnOneListPage() {
       oneOnOnesApi
         .myRuns()
         .then((res) => setRuns(res.runs))
+        .finally(() => setLoading(false));
+    } else if (tab === 'audit') {
+      oneOnOnesApi
+        .list('audit')
+        .then((res) => setAuditItems(res.templates))
         .finally(() => setLoading(false));
     } else {
       oneOnOnesApi
@@ -124,14 +133,21 @@ export function OneOnOneListPage() {
         <h1>One-on-Ones</h1>
         {canManage && <NewOneOnOneMenu />}
       </div>
-      {canManage && (
+      {(canManage || isAuditor) && (
         <div className="tabs">
           <button className={tab === 'assigned' ? 'active' : ''} onClick={() => setTab('assigned')}>
             Assigned to me
           </button>
-          <button className={tab === 'initiated' ? 'active' : ''} onClick={() => setTab('initiated')}>
-            Initiated by me
-          </button>
+          {canManage && (
+            <button className={tab === 'initiated' ? 'active' : ''} onClick={() => setTab('initiated')}>
+              Initiated by me
+            </button>
+          )}
+          {isAuditor && (
+            <button className={tab === 'audit' ? 'active' : ''} onClick={() => setTab('audit')}>
+              Audit
+            </button>
+          )}
         </div>
       )}
       {tab === 'assigned' && (
@@ -176,7 +192,7 @@ export function OneOnOneListPage() {
                   <h3>{group.templateTitle}</h3>
                   {(completedCountByTemplate.get(group.templateId) ?? 0) >= 2 && (
                     <Link
-                      to={`/one-on-ones/${group.templateId}/trend/${user?.id}`}
+                      to={`/one-on-ones/${group.templateId}/trend/${member?.id}`}
                       className="dashboard-link"
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -199,6 +215,22 @@ export function OneOnOneListPage() {
               </details>
             ))}
           </div>
+        )
+      ) : tab === 'audit' ? (
+        auditItems.length === 0 ? (
+          <p className="empty-state">No one-on-ones created within your group yet.</p>
+        ) : (
+          <ul className="survey-list">
+            {auditItems.map((t) => (
+              <li key={t.id}>
+                <Link to={`/one-on-ones/${t.id}/edit`}>
+                  <span className="survey-title">{t.title}</span>
+                  <span className={`status-badge ${t.status.toLowerCase()}`}>{t.status}</span>
+                  {t.createdBy && <span className="muted">by {t.createdBy.name}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
         )
       ) : initiated.length === 0 ? (
         <p className="empty-state">

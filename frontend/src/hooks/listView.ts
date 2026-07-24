@@ -1,9 +1,9 @@
-// Remembers the last tab/filter a user had open on the Surveys and One-on-Ones
+// Remembers the last tab/filter a member had open on the Surveys and One-on-Ones
 // list pages, so returning via the top nav (not a contextual back button)
 // lands back where they left off instead of resetting to the default view.
 // Session-scoped (cleared on logout/new tab) rather than permanent.
 
-export type SurveyScope = 'created' | 'targeted';
+export type SurveyScope = 'created' | 'targeted' | 'audit' | 'viewing';
 export type SurveyStatusTab = 'draft' | 'active' | 'completed' | 'closed';
 
 export interface SurveyListView {
@@ -34,11 +34,13 @@ export function surveyListViewLabel(view: SurveyListView): string {
     if (view.statusTab === 'completed') return 'Completed';
     return 'Pending';
   }
+  if (view.scope === 'audit') return 'Audit';
+  if (view.scope === 'viewing') return 'Viewing';
   if (view.statusTab === 'draft') return 'Drafts';
   return view.statusTab === 'closed' ? 'Closed' : 'Active';
 }
 
-export type OneOnOneTab = 'assigned' | 'initiated';
+export type OneOnOneTab = 'assigned' | 'initiated' | 'audit';
 export type OneOnOneAssignedFilter = 'todo' | 'completed';
 export type OneOnOneInitiatedFilter = 'draft' | 'published';
 
@@ -69,5 +71,6 @@ export function oneOnOneListViewLabel(view: OneOnOneListView): string {
   if (view.tab === 'assigned') {
     return view.assignedFilter === 'completed' ? 'Completed' : 'To do';
   }
+  if (view.tab === 'audit') return 'Audit';
   return view.initiatedFilter === 'published' ? 'Published' : 'Drafts';
 }

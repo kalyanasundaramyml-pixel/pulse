@@ -2,10 +2,10 @@
 // ../responses/anonymousResponse.repository (enforced by ESLint
 // no-restricted-imports) — anonymous survey results must stay structurally
 // unlinkable to any respondent, even for an Admin viewing the dashboard.
-import { User } from '@prisma/client';
+import { Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { env } from '../../config/env';
-import { assertSurveyOwnerOrAdmin } from '../surveys/surveyAuth';
+import { assertCanViewSurveyDashboard } from '../surveys/surveyAuth';
 
 const MIN_RESPONSES = env.MIN_ANONYMOUS_RESPONSES_FOR_BREAKDOWN;
 
@@ -109,8 +109,8 @@ async function buildQuestionSummaries(surveyId: string, isAnonymous: boolean, re
   return summaries;
 }
 
-export async function getDashboard(surveyId: string, user: User) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, user);
+export async function getDashboard(surveyId: string, member: Member) {
+  const survey = await assertCanViewSurveyDashboard(surveyId, member);
 
   const [targetCount, respondedCount] = await Promise.all([
     prisma.surveyRecipient.count({ where: { surveyId } }),
@@ -139,15 +139,15 @@ export async function getDashboard(surveyId: string, user: User) {
   // AttributedDashboardDTO: includes respondent identities.
   const responses = await prisma.attributedResponse.findMany({
     where: { surveyId },
-    include: { respondentUser: { select: { id: true, name: true, email: true } } },
+    include: { respondentMember: { select: { id: true, name: true, email: true } } },
   });
 
   return {
     ...base,
     respondents: responses.map((r) => ({
-      userId: r.respondentUser.id,
-      name: r.respondentUser.name,
-      email: r.respondentUser.email,
+      memberId: r.respondentMember.id,
+      name: r.respondentMember.name,
+      email: r.respondentMember.email,
       submittedAt: r.submittedAt,
       updatedAt: r.updatedAt,
     })),

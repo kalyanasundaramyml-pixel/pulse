@@ -1,20 +1,20 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { UserRole } from '../../types/api';
+import { MemberRole } from '../../types/api';
 
-export function ProtectedRoute({ roles }: { roles?: UserRole[] }) {
-  const { user, loading } = useAuth();
+export function ProtectedRoute({ roles }: { roles?: MemberRole[] }) {
+  const { member, loading } = useAuth();
 
   if (loading) {
     return <div className="page-loading">Loading...</div>;
   }
-  if (!user) {
+  if (!member) {
     return <Navigate to="/login" replace />;
   }
-  if (user.mustChangePassword) {
+  if (member.mustChangePassword) {
     return <Navigate to="/change-password" replace />;
   }
-  if (roles && !roles.includes(user.role)) {
+  if (roles && !roles.includes(member.role)) {
     return <Navigate to="/" replace />;
   }
   return <Outlet />;

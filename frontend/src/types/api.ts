@@ -1,29 +1,38 @@
-export type UserRole = 'ADMIN' | 'CREATOR' | 'USER';
+export type MemberRole = 'ADMIN' | 'CREATOR' | 'AUDITOR' | 'MEMBER';
 export type SurveyStatus = 'DRAFT' | 'PUBLISHED' | 'CLOSED';
 export type OneOnOneStatus = 'DRAFT' | 'PUBLISHED';
 export type QuestionType = 'RATING' | 'TEXT' | 'SINGLE_CHOICE' | 'MULTI_CHOICE';
 export type BlockType = 'WELCOME' | 'QUESTIONS' | 'END';
 
-export interface PublicUser {
+export interface PublicMember {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
+  role: MemberRole;
   mustChangePassword: boolean;
 }
 
-export interface AdminUserRow {
+export interface AdminMemberRow {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
+  role: MemberRole;
+  group: { id: string; name: string };
   isActive: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   createdAt: string;
 }
 
-export interface DirectoryUser {
+export interface Group {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  memberCount: number;
+  createdAt: string;
+}
+
+export interface DirectoryMember {
   id: string;
   name: string;
   email: string;
@@ -34,7 +43,7 @@ export interface ImportResult {
   totalRows: number;
   successCount: number;
   errorCount: number;
-  createdUsers: { name: string; email: string; role: UserRole; tempPassword: string }[];
+  createdMembers: { name: string; email: string; role: MemberRole; tempPassword: string }[];
   errors: { row: number; email?: string; message: string }[];
 }
 
@@ -79,13 +88,13 @@ export interface Survey {
   isPublic: boolean;
   createdBy?: { id: string; name: string };
   _count?: { questions: number; recipients: number; responseAccess: number; attributedResponses: number };
-  // Only present for scope='targeted' — whether the current user has already responded.
+  // Only present for scope='targeted' — whether the current member has already responded.
   hasResponded?: boolean;
 }
 
 export interface SurveyDetail extends Survey {
   blocks: Block[];
-  recipients: { user: DirectoryUser; resubmitAllowed: boolean }[];
+  recipients: { member: DirectoryMember; resubmitAllowed: boolean }[];
 }
 
 export interface AnswerInput {
@@ -153,22 +162,22 @@ export interface AttributedDashboardDTO {
   survey: { id: string; title: string; isAnonymous: false; status: SurveyStatus };
   completion: { targetCount: number; respondedCount: number; rate: number };
   questions: QuestionSummary[];
-  respondents: { userId: string; name: string; email: string; submittedAt: string; updatedAt: string }[];
+  respondents: { memberId: string; name: string; email: string; submittedAt: string; updatedAt: string }[];
 }
 
 export type DashboardDTO = AnonymousDashboardDTO | AttributedDashboardDTO;
 
-export interface GroupSummary {
+export interface CircleSummary {
   id: string;
   name: string;
   memberCount: number;
   createdAt: string;
 }
 
-export interface GroupDetail {
+export interface CircleDetail {
   id: string;
   name: string;
-  members: DirectoryUser[];
+  members: DirectoryMember[];
 }
 
 export type OneOnOneRunStatus = 'PENDING' | 'COMPLETED';
@@ -189,7 +198,7 @@ export interface OneOnOneTemplate {
 
 export interface OneOnOneTemplateDetail extends OneOnOneTemplate {
   blocks: Block[];
-  recipients: { user: DirectoryUser; runCount: number }[];
+  recipients: { member: DirectoryMember; runCount: number }[];
 }
 
 export interface OneOnOneRun {
@@ -198,7 +207,7 @@ export interface OneOnOneRun {
   status: OneOnOneRunStatus;
   createdAt: string;
   submittedAt: string | null;
-  respondentUser?: DirectoryUser;
+  respondentMember?: DirectoryMember;
   template?: { id: string; title: string; description: string | null };
 }
 

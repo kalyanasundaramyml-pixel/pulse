@@ -8,10 +8,9 @@ import { requireRole } from '../../middleware/requireRole';
 
 export const groupsRouter = Router();
 
-groupsRouter.use(requireAuth, requirePasswordChanged, requireRole('CREATOR', 'ADMIN'));
+groupsRouter.use(requireAuth, requirePasswordChanged, requireRole('ADMIN'));
 
 groupsRouter.get('/', controller.listGroups);
 groupsRouter.post('/', validate(createGroupSchema), controller.createGroup);
-groupsRouter.get('/:id', controller.getGroup);
 groupsRouter.patch('/:id', validate(updateGroupSchema), controller.updateGroup);
 groupsRouter.delete('/:id', controller.deleteGroup);

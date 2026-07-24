@@ -5,7 +5,7 @@ import { authApi } from '../api/auth';
 import { ApiError } from '../api/client';
 
 export function ForceChangePasswordPage() {
-  const { user, loading, refresh } = useAuth();
+  const { member, loading, refresh } = useAuth();
   const navigate = useNavigate();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -13,10 +13,10 @@ export function ForceChangePasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!loading && !user) {
+  if (!loading && !member) {
     return <Navigate to="/login" replace />;
   }
-  if (!loading && user && !user.mustChangePassword) {
+  if (!loading && member && !member.mustChangePassword) {
     return <Navigate to="/" replace />;
   }
 

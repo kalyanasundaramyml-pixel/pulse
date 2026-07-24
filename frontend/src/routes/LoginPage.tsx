@@ -4,14 +4,14 @@ import { useAuth } from '../hooks/useAuth';
 import { ApiError } from '../api/client';
 
 export function LoginPage() {
-  const { user, loading, login } = useAuth();
+  const { member, loading, login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (!loading && user) {
+  if (!loading && member) {
     return <Navigate to="/" replace />;
   }
 

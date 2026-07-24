@@ -15,7 +15,7 @@ export const updateTemplateSchema = z.object({
 });
 
 export const listTemplatesQuerySchema = z.object({
-  scope: z.enum(['created', 'all', 'public']).default('created'),
+  scope: z.enum(['created', 'all', 'public', 'audit']).default('created'),
 });
 
 export const createBlockSchema = z.object({
@@ -67,15 +67,15 @@ export const reorderQuestionsSchema = z.object({
 });
 
 export const setRecipientsSchema = z.object({
-  userIds: z.array(z.string().uuid()).min(1),
+  memberIds: z.array(z.string().uuid()).min(1),
 });
 
 export const addRecipientsSchema = z.object({
-  userIds: z.array(z.string().uuid()).min(1),
+  memberIds: z.array(z.string().uuid()).min(1),
 });
 
 export const startRunSchema = z.object({
-  recipientUserId: z.string().uuid(),
+  recipientMemberId: z.string().uuid(),
 });
 
 export const answerSchema = z.object({

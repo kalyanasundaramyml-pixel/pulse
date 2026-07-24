@@ -16,7 +16,7 @@ export function RespondentTable({ respondents }: { respondents: AttributedDashbo
       </thead>
       <tbody>
         {respondents.map((r) => (
-          <tr key={r.userId}>
+          <tr key={r.memberId}>
             <td>{r.name}</td>
             <td>{r.email}</td>
             <td>{new Date(r.submittedAt).toLocaleString()}</td>
