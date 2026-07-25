@@ -8,7 +8,7 @@ import { requireRole } from '../../middleware/requireRole';
 
 export const circlesRouter = Router();
 
-circlesRouter.use(requireAuth, requirePasswordChanged, requireRole('CREATOR', 'ADMIN'));
+circlesRouter.use(requireAuth, requirePasswordChanged, requireRole('CREATOR', 'AUDITOR', 'ADMIN'));
 
 circlesRouter.get('/', controller.listCircles);
 circlesRouter.post('/', validate(createCircleSchema), controller.createCircle);

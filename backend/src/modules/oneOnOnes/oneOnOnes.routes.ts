@@ -31,10 +31,11 @@ oneOnOnesRouter.get('/runs/mine', controller.getMyRuns);
 oneOnOnesRouter.get('/runs/:runId/take', controller.getTakeRun);
 oneOnOnesRouter.post('/runs/:runId/responses', validate(submitRunSchema), controller.submitRun);
 
-// Templates (Creator/Admin) — the three read-only GETs also allow Auditor;
-// service-level checks (assertCanViewTemplateDetail/assertCanAuditTemplate)
-// scope that down to the Auditor's own group.
-oneOnOnesRouter.post('/', requireRole('CREATOR', 'ADMIN'), validate(createTemplateSchema), controller.createTemplate);
+// Templates (Creator/Auditor/Admin) — an Auditor has full Creator-style
+// control over their own templates/1:1s, plus (via the three read-only GETs
+// below) group-scoped read access to everyone else's, enforced in the
+// service by assertCanViewTemplateDetail/assertCanAuditTemplate.
+oneOnOnesRouter.post('/', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createTemplateSchema), controller.createTemplate);
 oneOnOnesRouter.get(
   '/',
   requireRole('CREATOR', 'ADMIN', 'AUDITOR'),
@@ -42,27 +43,27 @@ oneOnOnesRouter.get(
   controller.listTemplates,
 );
 oneOnOnesRouter.get('/:id', requireRole('CREATOR', 'ADMIN', 'AUDITOR'), controller.getTemplate);
-oneOnOnesRouter.patch('/:id', requireRole('CREATOR', 'ADMIN'), validate(updateTemplateSchema), controller.updateTemplate);
-oneOnOnesRouter.delete('/:id', requireRole('CREATOR', 'ADMIN'), controller.deleteTemplate);
-oneOnOnesRouter.post('/:id/duplicate', requireRole('CREATOR', 'ADMIN'), validate(duplicateTemplateSchema), controller.duplicateTemplate);
-oneOnOnesRouter.post('/:id/publish', requireRole('CREATOR', 'ADMIN'), controller.publishTemplate);
-oneOnOnesRouter.post('/:id/unpublish', requireRole('CREATOR', 'ADMIN'), controller.unpublishTemplate);
+oneOnOnesRouter.patch('/:id', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateTemplateSchema), controller.updateTemplate);
+oneOnOnesRouter.delete('/:id', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteTemplate);
+oneOnOnesRouter.post('/:id/duplicate', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(duplicateTemplateSchema), controller.duplicateTemplate);
+oneOnOnesRouter.post('/:id/publish', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.publishTemplate);
+oneOnOnesRouter.post('/:id/unpublish', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.unpublishTemplate);
 
-oneOnOnesRouter.post('/:id/blocks', requireRole('CREATOR', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
-oneOnOnesRouter.patch('/:id/blocks/:blockId', requireRole('CREATOR', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
-oneOnOnesRouter.delete('/:id/blocks/:blockId', requireRole('CREATOR', 'ADMIN'), controller.deleteBlock);
-oneOnOnesRouter.put('/:id/blocks/reorder', requireRole('CREATOR', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
+oneOnOnesRouter.post('/:id/blocks', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
+oneOnOnesRouter.patch('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
+oneOnOnesRouter.delete('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteBlock);
+oneOnOnesRouter.put('/:id/blocks/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
 
-oneOnOnesRouter.post('/:id/blocks/:blockId/questions', requireRole('CREATOR', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
-oneOnOnesRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
-oneOnOnesRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'ADMIN'), controller.deleteQuestion);
-oneOnOnesRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREATOR', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
+oneOnOnesRouter.post('/:id/blocks/:blockId/questions', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
+oneOnOnesRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
+oneOnOnesRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteQuestion);
+oneOnOnesRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
 
-oneOnOnesRouter.put('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
-oneOnOnesRouter.post('/:id/recipients', requireRole('CREATOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);
-oneOnOnesRouter.delete('/:id/recipients/:memberId', requireRole('CREATOR', 'ADMIN'), controller.removeRecipient);
+oneOnOnesRouter.put('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
+oneOnOnesRouter.post('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);
+oneOnOnesRouter.delete('/:id/recipients/:memberId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.removeRecipient);
 
-oneOnOnesRouter.post('/:id/runs', requireRole('CREATOR', 'ADMIN'), validate(startRunSchema), controller.startRun);
+oneOnOnesRouter.post('/:id/runs', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(startRunSchema), controller.startRun);
 oneOnOnesRouter.get('/:id/runs', requireRole('CREATOR', 'ADMIN', 'AUDITOR'), controller.listRuns);
 // No role gate here — a recipient may view their own trend; the service
 // enforces that non-owners can only ever request their own memberId.

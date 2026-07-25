@@ -20,12 +20,12 @@ function AppNav() {
       <NavLink to="/one-on-ones" className={({ isActive }) => (isActive && !isTemplateActive ? 'active' : '')}>
         One-on-Ones
       </NavLink>
-      {(member?.role === 'CREATOR' || member?.role === 'ADMIN') && (
+      {(member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN') && (
         <NavLink to="/templates" className={({ isActive }) => (isActive || isTemplateActive ? 'active' : '')}>
           Templates
         </NavLink>
       )}
-      {(member?.role === 'CREATOR' || member?.role === 'ADMIN') && (
+      {(member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN') && (
         <NavLink to="/circles" className={({ isActive }) => (isActive ? 'active' : '')}>
           Circles
         </NavLink>

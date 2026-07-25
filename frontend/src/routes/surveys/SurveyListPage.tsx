@@ -54,7 +54,7 @@ export function SurveyListPage() {
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canCreate = member?.role === 'CREATOR' || member?.role === 'ADMIN';
+  const canCreate = member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN';
   const isAuditor = member?.role === 'AUDITOR';
 
   useEffect(() => {

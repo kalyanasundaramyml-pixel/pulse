@@ -60,9 +60,20 @@ describe('Group-scoped Auditor oversight and Viewer grants', () => {
     const dashAsAuditorB = await auditorBAgent.get(`/api/surveys/${surveyId}/dashboard`);
     expect(dashAsAuditorB.status).toBe(403);
 
-    // An Auditor still cannot perform Creator/Admin-only mutations.
+    // An Auditor has full Creator-style capability for their own content, but
+    // that doesn't extend to someone else's survey — this is an ownership
+    // check, not a role check, so it applies to Auditors exactly like Creators.
     const closeAsAuditorA = await auditorAAgent.post(`/api/surveys/${surveyId}/close`);
     expect(closeAsAuditorA.status).toBe(403);
+
+    // An Auditor CAN create and manage their own survey, just like a Creator.
+    const ownSurveyRes = await auditorAAgent.post('/api/surveys').send({ title: "Auditor's own survey", isAnonymous: false });
+    expect(ownSurveyRes.status).toBe(201);
+    const ownSurveyId = ownSurveyRes.body.survey.id;
+    const closeOwnAsDraft = await auditorAAgent.post(`/api/surveys/${ownSurveyId}/close`);
+    expect(closeOwnAsDraft.status).toBe(409); // not published yet — proves the ownership check passed, not blocked by role
+    const deleteOwnRes = await auditorAAgent.delete(`/api/surveys/${ownSurveyId}`);
+    expect(deleteOwnRes.status).toBe(204);
 
     // Group A's Auditor grants Viewer to the group-B recipient.
     const grantRes = await auditorAAgent.post(`/api/surveys/${surveyId}/viewers`).send({ memberId: recipientB.member.id });

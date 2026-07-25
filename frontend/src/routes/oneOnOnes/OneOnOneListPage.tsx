@@ -61,7 +61,7 @@ export function OneOnOneListPage() {
   const [auditItems, setAuditItems] = useState<OneOnOneTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const canManage = member?.role === 'CREATOR' || member?.role === 'ADMIN';
+  const canManage = member?.role === 'CREATOR' || member?.role === 'AUDITOR' || member?.role === 'ADMIN';
   const isAuditor = member?.role === 'AUDITOR';
 
   // Remembered so returning via the top-nav "One-on-Ones" link (rather than a
