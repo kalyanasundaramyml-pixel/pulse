@@ -3,10 +3,19 @@
 Self-hosted web app for creating anonymous or attributed feedback
 surveys and recurring 1:1 check-ins, targeting a hand-picked list of
 recipients, and viewing results (including 1:1 trends over time) on a creator
-dashboard. See [the implementation plan](.) for the full design rationale
-(anonymity model, schema, API surface, milestones), or
+dashboard. See [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) for the full
+design rationale (anonymity model, schema, API surface, permission model), or
 [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to actually use the app
-as a User, Creator, or Admin.
+as a Member, Creator, Auditor, or Admin.
+
+Every member belongs to exactly one org **Group** (managed by an Admin under
+**Groups**), separate from a **Circle** (an ad-hoc, shareable recipient list
+that can freely mix members from any Group). An **Auditor** gets full Creator
+capabilities over their own surveys/1:1s, plus read-only oversight of every
+survey/1:1 created within their own Group, and can grant a specific member or
+creator narrow **Viewer** access to one survey's dashboard regardless of
+Group. See the in-app **Help** page (role-specific guides + FAQ) for the full
+rundown.
 
 ## Stack
 
@@ -20,10 +29,10 @@ as a User, Creator, or Admin.
 ## Anonymity model
 
 Anonymous survey responses are stored in tables (`anonymous_responses`,
-`anonymous_answers`, ...) that have **no column referencing a user at all**.
+`anonymous_answers`, ...) that have **no column referencing a member at all**.
 A separate backend-only table, `survey_response_access`, is the sole mechanism
-used to enforce "one response per user" and to let a user find/edit their own
-response — it is never read by any creator-facing or dashboard code path (this
+used to enforce "one response per member" and to let a member find/edit their
+own response — it is never read by any creator-facing or dashboard code path (this
 is enforced by an ESLint rule, not just convention). Attributed survey
 responses live in a parallel set of tables that do carry the respondent's
 identity. See [backend/src/modules/responses/anonymousResponse.repository.ts](backend/src/modules/responses/anonymousResponse.repository.ts).
@@ -73,10 +82,12 @@ account from `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_TEMP_PASSWORD`. Log in
 with those credentials and you'll be forced to set a new password immediately.
 
 From there, the Admin can bulk-import the rest of the org via **Admin → Import
-CSV** (columns: `name,email,role`). Since there's no SMTP relay, the import
-generates a random temp password per user and returns them once as a
-downloadable CSV for the Admin to distribute through your normal internal
-channel; each user is forced to set their own password on first login.
+CSV** (columns: `name,email,role,group` — `role` and `group` are both
+optional, defaulting to `MEMBER` and the org's default Group respectively).
+Since there's no SMTP relay, the import generates a random temp password per
+member and returns them once as a downloadable CSV for the Admin to
+distribute through your normal internal channel; each member is forced to
+set their own password on first login.
 
 ## Building behind a TLS-inspecting corporate proxy
 
@@ -106,12 +117,16 @@ machine running `docker compose build` sits behind such a proxy:
    cleanly, check with IT for the sanctioned way to trust it in Docker
    Desktop.
 
-2. **`npm install` inside the build** (and any `apk` calls). This one *is*
-   handled by this repo: drop your org's root CA as a `.crt` file into
-   `backend/certs/` **and** `frontend/certs/` (same file, both places) before
-   building. Both Dockerfiles trust anything in that directory automatically
-   via `update-ca-certificates` + `NODE_EXTRA_CA_CERTS`; it's a silent no-op if
-   the directories are empty, so this is always safe to leave in place. These
+2. **`npm install` inside the build** (and any `apk` calls, including the very
+   first one that installs `ca-certificates` itself). This one *is* handled by
+   this repo: drop your org's root CA as a `.crt` file into `backend/certs/`
+   **and** `frontend/certs/` (same file, both places) before building. Both
+   Dockerfiles append anything in that directory into the base image's CA
+   bundle *before* any network call runs — including the bootstrap `apk add`
+   that installs `ca-certificates`/`update-ca-certificates` themselves — so it
+   works even though that first call would otherwise fail under TLS
+   inspection before those tools exist to fix it. It's a silent no-op if the
+   directories are empty, so this is always safe to leave in place. These
    `certs/` folders are gitignored — don't rely on them for anything checked
    into version control.
 
