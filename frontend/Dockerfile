@@ -4,6 +4,15 @@ WORKDIR /app
 # Trust an optional corporate root CA so npm can fetch over HTTPS when built
 # on a machine behind a TLS-inspecting proxy. Drop your org's CA cert(s) as
 # .crt files into ./certs before building; no-op if empty.
+# Appended straight into the base image's pre-installed bundle *before* the
+# apk call below — that call itself needs network access, so under TLS
+# inspection it would fail before ca-certificates/update-ca-certificates are
+# even available to fix it.
+COPY certs/ /tmp/corporate-certs/
+RUN for f in /tmp/corporate-certs/*.crt; do \
+      [ -f "$f" ] && cat "$f" >> /etc/ssl/certs/ca-certificates.crt; \
+    done; \
+    rm -rf /tmp/corporate-certs
 RUN apk add --no-cache ca-certificates
 COPY certs/ /usr/local/share/ca-certificates/corporate/
 RUN update-ca-certificates
