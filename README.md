@@ -26,6 +26,42 @@ rundown.
 - **Deployment**: Docker Compose (`db`, `api`, `web`) — no external internet
   dependency at runtime (no SMTP, no CDN, no third-party APIs).
 
+## Running the full stack with Docker Compose
+
+```sh
+cp .env.example .env       # set POSTGRES_PASSWORD, SESSION_SECRET, ADMIN_BOOTSTRAP_*
+docker compose up --build -d
+```
+
+The app is served at `http://<server>:${WEB_PORT:-80}/`. On first boot the
+`api` container runs `prisma migrate deploy` then seeds the bootstrap Admin
+account from `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_TEMP_PASSWORD`. Log in
+with those credentials and you'll be forced to set a new password immediately.
+
+From there, the Admin can bulk-import the rest of the org via **Admin → Import
+CSV** (columns: `name,email,role,group` — `role` and `group` are both
+optional, defaulting to `MEMBER` and the org's default Group respectively).
+Since there's no SMTP relay, the import generates a random temp password per
+member and returns them once as a downloadable CSV for the Admin to
+distribute through your normal internal channel; each member is forced to
+set their own password on first login.
+
+## Deploying without building (pre-built images)
+
+Pulse also publishes pre-built images, so you can skip `docker compose build`
+entirely — the same way you'd deploy any other app that ships ready-made
+Docker images:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+`docker-compose.yml` pins `api`/`web` to
+`ghcr.io/kalyanasundaramyml-pixel/pulse-api:${PULSE_VERSION:-latest}` and
+`pulse-web` via the `image:` key alongside `build:`, so `pull` fetches them
+directly with no local build step.
+
 ## Anonymity model
 
 Anonymous survey responses are stored in tables (`anonymous_responses`,
@@ -68,74 +104,6 @@ cd frontend
 npm install
 npm run dev                # http://localhost:5173, proxies /api to :4000
 ```
-
-## Running the full stack with Docker Compose
-
-```sh
-cp .env.example .env       # set POSTGRES_PASSWORD, SESSION_SECRET, ADMIN_BOOTSTRAP_*
-docker compose up --build -d
-```
-
-The app is served at `http://<server>:${WEB_PORT:-80}/`. On first boot the
-`api` container runs `prisma migrate deploy` then seeds the bootstrap Admin
-account from `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_TEMP_PASSWORD`. Log in
-with those credentials and you'll be forced to set a new password immediately.
-
-From there, the Admin can bulk-import the rest of the org via **Admin → Import
-CSV** (columns: `name,email,role,group` — `role` and `group` are both
-optional, defaulting to `MEMBER` and the org's default Group respectively).
-Since there's no SMTP relay, the import generates a random temp password per
-member and returns them once as a downloadable CSV for the Admin to
-distribute through your normal internal channel; each member is forced to
-set their own password on first login.
-
-## Building behind a TLS-inspecting corporate proxy
-
-Some corporate networks intercept and re-sign HTTPS traffic with their own
-root CA. This only matters at **build time** — once the images are built,
-the running containers make zero outbound internet calls (no SMTP, no CDN,
-no third-party APIs), so a TLS-inspecting proxy has nothing to intercept
-while the app is actually running.
-
-There are two independent things that need your org's root CA trusted if the
-machine running `docker compose build` sits behind such a proxy:
-
-1. **Docker Desktop pulling the base images** (`node:20-alpine`,
-   `postgres:16-alpine`, `nginx:1.27-alpine`) from Docker Hub. This happens
-   before any `Dockerfile` instruction runs, so it can't be fixed from inside
-   this repo — it's a Docker Desktop / OS-level trust issue. If
-   `docker compose build` fails immediately with a certificate error while
-   pulling an image, get your org's root CA (IT can provide it, or export it
-   yourself on Windows via `certmgr.msc` → *Trusted Root Certification
-   Authorities* → find your proxy's CA → *Export* as Base-64 X.509 `.crt`)
-   and import it into Docker Desktop's trust store — on Windows with the
-   WSL2 backend that generally means adding the cert to the WSL distro
-   Docker Desktop uses (`update-ca-certificates` inside it) or configuring
-   it under Docker Desktop → *Settings* → *Docker Engine* / *Resources* →
-   *Proxies*, per Docker's docs for corporate proxies. This step depends on
-   your specific Docker Desktop version and IT setup, so if it doesn't pull
-   cleanly, check with IT for the sanctioned way to trust it in Docker
-   Desktop.
-
-2. **`npm install` inside the build** (and any `apk` calls, including the very
-   first one that installs `ca-certificates` itself). This one *is* handled by
-   this repo: drop your org's root CA as a `.crt` file into `backend/certs/`
-   **and** `frontend/certs/` (same file, both places) before building. Both
-   Dockerfiles append anything in that directory into the base image's CA
-   bundle *before* any network call runs — including the bootstrap `apk add`
-   that installs `ca-certificates`/`update-ca-certificates` themselves — so it
-   works even though that first call would otherwise fail under TLS
-   inspection before those tools exist to fix it. It's a silent no-op if the
-   directories are empty, so this is always safe to leave in place. These
-   `certs/` folders are gitignored — don't rely on them for anything checked
-   into version control.
-
-Users' browsers reaching the app are generally unaffected by a
-TLS-inspecting proxy either way: this app is served over plain HTTP inside
-the network (see `COOKIE_SECURE` below), and proxy SSL inspection only
-applies to HTTPS traffic. If you later put TLS in front of this app with
-your own internal CA, that's a separate, unrelated certificate-trust step
-for browsers — nothing to do with the build-time proxy.
 
 ## Backups
 

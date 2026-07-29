@@ -16,6 +16,7 @@ services:
     networks: [internal]
 
   api:
+    image: ghcr.io/kalyanasundaramyml-pixel/pulse-api:${PULSE_VERSION:-latest}
     build: ./backend
     depends_on:
       db:
@@ -35,6 +36,7 @@ services:
     networks: [internal]
 
   web:
+    image: ghcr.io/kalyanasundaramyml-pixel/pulse-web:${PULSE_VERSION:-latest}
     build: ./frontend
     depends_on: [api]
     ports:
