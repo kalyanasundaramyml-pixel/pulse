@@ -76,79 +76,10 @@ export const unpublishTemplate: RequestHandler = async (req, res, next) => {
   }
 };
 
-export const addBlock: RequestHandler = async (req, res, next) => {
+export const saveDraft: RequestHandler = async (req, res, next) => {
   try {
-    const block = await service.addBlock(req.params.id, req.member!, req.body.name);
-    res.status(201).json({ block });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const updateBlock: RequestHandler = async (req, res, next) => {
-  try {
-    const block = await service.updateBlock(req.params.id, req.params.blockId, req.member!, req.body);
-    res.json({ block });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const deleteBlock: RequestHandler = async (req, res, next) => {
-  try {
-    await service.deleteBlock(req.params.id, req.params.blockId, req.member!);
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const reorderBlocks: RequestHandler = async (req, res, next) => {
-  try {
-    await service.reorderBlocks(req.params.id, req.member!, req.body.blockIds);
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const addQuestion: RequestHandler = async (req, res, next) => {
-  try {
-    const question = await service.addQuestion(req.params.id, req.params.blockId, req.member!, req.body);
-    res.status(201).json({ question });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const updateQuestion: RequestHandler = async (req, res, next) => {
-  try {
-    const question = await service.updateQuestion(
-      req.params.id,
-      req.params.blockId,
-      req.params.qid,
-      req.member!,
-      req.body,
-    );
-    res.json({ question });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const deleteQuestion: RequestHandler = async (req, res, next) => {
-  try {
-    await service.deleteQuestion(req.params.id, req.params.blockId, req.params.qid, req.member!);
-    res.status(204).end();
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const reorderQuestions: RequestHandler = async (req, res, next) => {
-  try {
-    await service.reorderQuestions(req.params.id, req.params.blockId, req.member!, req.body.questionIds);
-    res.status(204).end();
+    const template = await service.saveDraft(req.params.id, req.member!, req.body);
+    res.json({ template });
   } catch (err) {
     next(err);
   }

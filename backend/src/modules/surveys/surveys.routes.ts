@@ -4,12 +4,7 @@ import {
   createSurveySchema,
   updateSurveySchema,
   listSurveysQuerySchema,
-  createBlockSchema,
-  updateBlockSchema,
-  reorderBlocksSchema,
-  createQuestionSchema,
-  updateQuestionSchema,
-  reorderQuestionsSchema,
+  saveDraftSchema,
   setRecipientsSchema,
   addRecipientsSchema,
   reopenSurveySchema,
@@ -36,15 +31,7 @@ surveysRouter.post('/:id/unpublish', requireRole('CREATOR', 'AUDITOR', 'ADMIN'),
 surveysRouter.post('/:id/reopen', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reopenSurveySchema), controller.reopenSurvey);
 surveysRouter.post('/:id/duplicate', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(duplicateSurveySchema), controller.duplicateSurvey);
 
-surveysRouter.post('/:id/blocks', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
-surveysRouter.patch('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
-surveysRouter.delete('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteBlock);
-surveysRouter.put('/:id/blocks/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
-
-surveysRouter.post('/:id/blocks/:blockId/questions', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
-surveysRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
-surveysRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteQuestion);
-surveysRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
+surveysRouter.put('/:id/draft', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(saveDraftSchema), controller.saveDraft);
 
 surveysRouter.put('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 surveysRouter.post('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);

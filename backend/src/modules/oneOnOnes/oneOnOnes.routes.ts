@@ -4,12 +4,7 @@ import {
   createTemplateSchema,
   updateTemplateSchema,
   listTemplatesQuerySchema,
-  createBlockSchema,
-  updateBlockSchema,
-  reorderBlocksSchema,
-  createQuestionSchema,
-  updateQuestionSchema,
-  reorderQuestionsSchema,
+  saveDraftSchema,
   setRecipientsSchema,
   addRecipientsSchema,
   startRunSchema,
@@ -49,15 +44,7 @@ oneOnOnesRouter.post('/:id/duplicate', requireRole('CREATOR', 'AUDITOR', 'ADMIN'
 oneOnOnesRouter.post('/:id/publish', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.publishTemplate);
 oneOnOnesRouter.post('/:id/unpublish', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.unpublishTemplate);
 
-oneOnOnesRouter.post('/:id/blocks', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createBlockSchema), controller.addBlock);
-oneOnOnesRouter.patch('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateBlockSchema), controller.updateBlock);
-oneOnOnesRouter.delete('/:id/blocks/:blockId', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteBlock);
-oneOnOnesRouter.put('/:id/blocks/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderBlocksSchema), controller.reorderBlocks);
-
-oneOnOnesRouter.post('/:id/blocks/:blockId/questions', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(createQuestionSchema), controller.addQuestion);
-oneOnOnesRouter.patch('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(updateQuestionSchema), controller.updateQuestion);
-oneOnOnesRouter.delete('/:id/blocks/:blockId/questions/:qid', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), controller.deleteQuestion);
-oneOnOnesRouter.put('/:id/blocks/:blockId/questions/reorder', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(reorderQuestionsSchema), controller.reorderQuestions);
+oneOnOnesRouter.put('/:id/draft', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(saveDraftSchema), controller.saveDraft);
 
 oneOnOnesRouter.put('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(setRecipientsSchema), controller.setRecipients);
 oneOnOnesRouter.post('/:id/recipients', requireRole('CREATOR', 'AUDITOR', 'ADMIN'), validate(addRecipientsSchema), controller.addRecipients);

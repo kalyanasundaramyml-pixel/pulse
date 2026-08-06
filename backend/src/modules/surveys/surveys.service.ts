@@ -1,4 +1,4 @@
-import { Survey, SurveyBlock, QuestionType, Member } from '@prisma/client';
+import { Survey, Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import {
@@ -345,6 +345,7 @@ export async function duplicateSurvey(surveyId: string, member: Member, asTempla
           isRequired: q.isRequired,
           ratingScaleMin: q.ratingScaleMin,
           ratingScaleMax: q.ratingScaleMax,
+          maxChoices: q.maxChoices,
           options: { create: q.options.map((o) => ({ position: o.position, label: o.label })) },
         },
       });
@@ -362,134 +363,13 @@ export async function duplicateSurvey(surveyId: string, member: Member, asTempla
   return duplicate;
 }
 
-// ===== Blocks =====
+// ===== Draft save =====
 // A survey is Welcome -> N named QUESTIONS blocks -> End. Welcome/End are
 // created once (in createSurvey/duplicateSurvey) and can never be added,
-// deleted, or reordered — only their title/body text is editable. Only
-// QUESTIONS blocks can be added, renamed, deleted, and reordered among
-// themselves.
-
-async function getBlockOr404(surveyId: string, blockId: string): Promise<SurveyBlock> {
-  const block = await prisma.surveyBlock.findFirst({ where: { id: blockId, surveyId } });
-  if (!block) {
-    throw new NotFoundError('Block not found');
-  }
-  return block;
-}
-
-export async function addBlock(surveyId: string, member: Member, name: string) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
-  const endBlock = blocks.find((b) => b.blockType === 'END');
-  if (!endBlock) {
-    throw new NotFoundError('End block not found');
-  }
-  return prisma.$transaction(async (tx) => {
-    await tx.surveyBlock.update({ where: { id: endBlock.id }, data: { position: endBlock.position + 1 } });
-    return tx.surveyBlock.create({
-      data: { surveyId, position: endBlock.position, blockType: 'QUESTIONS', name },
-    });
-  });
-}
-
-export async function updateBlock(
-  surveyId: string,
-  blockId: string,
-  member: Member,
-  input: { name?: string; title?: string; body?: string },
-) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  await getBlockOr404(surveyId, blockId);
-  return prisma.surveyBlock.update({
-    where: { id: blockId },
-    data: { name: input.name, title: input.title, body: input.body },
-  });
-}
-
-export async function deleteBlock(surveyId: string, blockId: string, member: Member) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  const block = await getBlockOr404(surveyId, blockId);
-  if (block.blockType !== 'QUESTIONS') {
-    throw new ValidationError('The Welcome and End blocks cannot be deleted');
-  }
-  const questions = await prisma.question.findMany({ where: { blockId }, select: { id: true } });
-  for (const q of questions) {
-    const answerCount = await countAnswersForQuestion(survey, q.id);
-    if (answerCount > 0) {
-      throw new ConflictError(
-        'QUESTION_HAS_RESPONSES',
-        'Cannot delete a block containing a question that already has responses.',
-      );
-    }
-  }
-  await prisma.surveyBlock.delete({ where: { id: blockId } });
-}
-
-export async function reorderBlocks(surveyId: string, member: Member, blockIds: string[]) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  const blocks = await prisma.surveyBlock.findMany({ where: { surveyId } });
-  const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
-  const questionBlockIds = new Set(questionBlocks.map((b) => b.id));
-  if (blockIds.length !== questionBlocks.length || !blockIds.every((id) => questionBlockIds.has(id))) {
-    throw new ValidationError('blockIds must match the full set of question blocks on this survey');
-  }
-  const welcome = blocks.find((b) => b.blockType === 'WELCOME');
-  const end = blocks.find((b) => b.blockType === 'END');
-  if (!welcome || !end) {
-    throw new NotFoundError('Welcome/End block not found');
-  }
-  const finalOrder = [welcome.id, ...blockIds, end.id];
-
-  await prisma.$transaction(
-    finalOrder.map((id, idx) => prisma.surveyBlock.update({ where: { id }, data: { position: idx + 1000 } })),
-  );
-  await prisma.$transaction(
-    finalOrder.map((id, idx) => prisma.surveyBlock.update({ where: { id }, data: { position: idx } })),
-  );
-}
-
-// ===== Questions =====
-
-interface QuestionInput {
-  questionType: QuestionType;
-  prompt: string;
-  isRequired: boolean;
-  ratingScaleMin?: number;
-  ratingScaleMax?: number;
-  options?: string[];
-}
-
-export async function addQuestion(surveyId: string, blockId: string, member: Member, input: QuestionInput) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  const block = await getBlockOr404(surveyId, blockId);
-  if (block.blockType !== 'QUESTIONS') {
-    throw new ValidationError('Questions can only be added to a named question block');
-  }
-  const maxPosition = await prisma.question.aggregate({ where: { blockId }, _max: { position: true } });
-  const position = (maxPosition._max.position ?? -1) + 1;
-
-  return prisma.question.create({
-    data: {
-      surveyId,
-      blockId,
-      position,
-      questionType: input.questionType,
-      prompt: input.prompt,
-      isRequired: input.isRequired,
-      ratingScaleMin: input.ratingScaleMin,
-      ratingScaleMax: input.ratingScaleMax,
-      options: input.options
-        ? { create: input.options.map((label, idx) => ({ position: idx, label })) }
-        : undefined,
-    },
-    include: { options: true },
-  });
-}
+// deleted, or reordered — only their title/body text is editable. Every
+// block/question add/edit/delete/reorder/move is staged client-side and
+// applied here in one transactional call — see the plan doc for the
+// position-collision-avoiding step ordering.
 
 async function countAnswersForQuestion(survey: Survey, questionId: string): Promise<number> {
   return survey.isAnonymous
@@ -497,81 +377,281 @@ async function countAnswersForQuestion(survey: Survey, questionId: string): Prom
     : prisma.attributedAnswer.count({ where: { questionId } });
 }
 
-export async function updateQuestion(
-  surveyId: string,
-  blockId: string,
-  questionId: string,
-  member: Member,
-  input: Partial<QuestionInput>,
-) {
+type DraftQuestionType = 'RATING' | 'TEXT' | 'MULTI_CHOICE';
+
+interface DraftQuestionInput {
+  id?: string;
+  questionType: DraftQuestionType;
+  prompt: string;
+  isRequired: boolean;
+  ratingScaleMin?: number;
+  ratingScaleMax?: number;
+  maxChoices?: number;
+  options?: string[];
+}
+
+interface DraftBlockInput {
+  id?: string;
+  blockType: 'WELCOME' | 'QUESTIONS' | 'END';
+  name?: string;
+  title?: string;
+  body?: string;
+  questions: DraftQuestionInput[];
+}
+
+interface SaveDraftInput {
+  title: string;
+  description?: string;
+  isAnonymous?: boolean;
+  endDate?: string | null;
+  blocks: DraftBlockInput[];
+}
+
+function optionsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+const TEMP_POSITION_OFFSET = 100000;
+
+export async function saveDraft(surveyId: string, member: Member, input: SaveDraftInput) {
   const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
   assertDraft(survey);
-  const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
-  if (!question) {
-    throw new NotFoundError('Question not found');
+
+  if (input.isAnonymous !== undefined && input.isAnonymous !== survey.isAnonymous && survey.publishedAt != null) {
+    throw new ConflictError(
+      'ANONYMITY_LOCKED',
+      'This survey has already been published once, so its anonymous/attributed setting can no longer change — respondents relied on that promise.',
+    );
   }
-  const isStructuralChange =
-    (input.questionType !== undefined && input.questionType !== question.questionType) || input.options !== undefined;
-  if (isStructuralChange) {
-    const answerCount = await countAnswersForQuestion(survey, questionId);
-    if (answerCount > 0) {
-      throw new ConflictError(
-        'QUESTION_HAS_RESPONSES',
-        'This question already has responses, so its type/options can no longer be restructured. You can still edit its prompt, required flag, or rating scale.',
-      );
+  if (input.title !== survey.title) {
+    await assertUniqueSurveyTitle(survey.createdById, input.title, surveyId);
+  }
+
+  const currentBlocks = await prisma.surveyBlock.findMany({
+    where: { surveyId },
+    orderBy: { position: 'asc' },
+    include: { questions: { include: { options: { orderBy: { position: 'asc' } } } } },
+  });
+  const currentBlockById = new Map(currentBlocks.map((b) => [b.id, b]));
+  const currentQuestionById = new Map(currentBlocks.flatMap((b) => b.questions.map((q) => [q.id, q] as const)));
+
+  const welcome = currentBlocks.find((b) => b.blockType === 'WELCOME');
+  const end = currentBlocks.find((b) => b.blockType === 'END');
+  if (!welcome || !end) throw new NotFoundError('Welcome/End block not found');
+
+  // ----- structural validation of the block list shape -----
+  if (input.blocks.length < 2) {
+    throw new ValidationError('A survey must have at least a Welcome and an End block');
+  }
+  const first = input.blocks[0];
+  const last = input.blocks[input.blocks.length - 1];
+  if (first.id !== welcome.id || first.blockType !== 'WELCOME') {
+    throw new ValidationError('The first block must be the existing Welcome block');
+  }
+  if (last.id !== end.id || last.blockType !== 'END') {
+    throw new ValidationError('The last block must be the existing End block');
+  }
+  const middleBlocks = input.blocks.slice(1, -1);
+  const seenBlockIds = new Set<string>();
+  for (const b of input.blocks) {
+    if (b.id) {
+      if (seenBlockIds.has(b.id)) throw new ValidationError('Duplicate block id in payload');
+      seenBlockIds.add(b.id);
+    }
+  }
+  for (const b of middleBlocks) {
+    if (b.blockType !== 'QUESTIONS') {
+      throw new ValidationError('Only named question blocks may appear between Welcome and End');
+    }
+    if (b.id && (b.id === welcome.id || b.id === end.id)) {
+      throw new ValidationError('Welcome/End blocks cannot be reordered into the middle');
+    }
+    if (b.id && !currentBlockById.has(b.id)) {
+      throw new NotFoundError(`Block ${b.id} not found`);
     }
   }
 
-  return prisma.$transaction(async (tx) => {
-    if (input.options) {
-      await tx.questionOption.deleteMany({ where: { questionId } });
-      await tx.questionOption.createMany({
-        data: input.options.map((label, idx) => ({ questionId, position: idx, label })),
+  // ----- structural validation + diff of the question list -----
+  const payloadQuestionIds = new Set<string>();
+  const seenQuestionIds = new Set<string>();
+  for (const b of input.blocks) {
+    for (const q of b.questions) {
+      if (q.id) {
+        if (seenQuestionIds.has(q.id)) throw new ValidationError('Duplicate question id in payload');
+        seenQuestionIds.add(q.id);
+        payloadQuestionIds.add(q.id);
+        if (!currentQuestionById.has(q.id)) throw new NotFoundError(`Question ${q.id} not found`);
+      }
+    }
+  }
+
+  const blocksToDelete = currentBlocks.filter((b) => b.blockType === 'QUESTIONS' && !seenBlockIds.has(b.id));
+  const questionsToDelete = [...currentQuestionById.values()].filter((q) => !payloadQuestionIds.has(q.id));
+
+  // ----- pre-flight conflict check: nothing is written until this passes -----
+  const conflicts: { questionId: string; prompt: string; reason: string }[] = [];
+  for (const q of questionsToDelete) {
+    const answerCount = await countAnswersForQuestion(survey, q.id);
+    if (answerCount > 0) {
+      conflicts.push({ questionId: q.id, prompt: q.prompt, reason: 'has responses and cannot be deleted' });
+    }
+  }
+  for (const b of input.blocks) {
+    for (const q of b.questions) {
+      if (!q.id) continue;
+      const current = currentQuestionById.get(q.id)!;
+      const currentOptionLabels = current.options.map((o) => o.label);
+      const isStructural =
+        q.questionType !== current.questionType ||
+        (q.options !== undefined && !optionsEqual(q.options, currentOptionLabels)) ||
+        (q.questionType === 'MULTI_CHOICE' && (q.maxChoices ?? 1) !== current.maxChoices);
+      if (isStructural) {
+        const answerCount = await countAnswersForQuestion(survey, q.id);
+        if (answerCount > 0) {
+          conflicts.push({
+            questionId: q.id,
+            prompt: q.prompt,
+            reason: 'already has responses, so its type/options/max choices can no longer change',
+          });
+        }
+      }
+    }
+  }
+  if (conflicts.length > 0) {
+    throw new ConflictError(
+      'QUESTION_HAS_RESPONSES',
+      `Cannot save — some questions already have responses: ${conflicts.map((c) => `"${c.prompt}"`).join(', ')}.`,
+      conflicts,
+    );
+  }
+
+  // ----- write transaction -----
+  await prisma.$transaction(async (tx) => {
+    await tx.survey.update({
+      where: { id: surveyId },
+      data: {
+        title: input.title,
+        description: input.description,
+        isAnonymous: input.isAnonymous,
+        endDate: input.endDate === undefined ? undefined : input.endDate ? new Date(input.endDate) : null,
+      },
+    });
+
+    // 1. Temp-park every block — existing blocks move off their current
+    //    position (which may collide with another block's final target
+    //    position later in step 5) and new blocks are created directly at a
+    //    temp position. Nothing is at its final 0..N-1 position after this.
+    const blockRealId: string[] = [];
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      if (b.id) {
+        await tx.surveyBlock.update({ where: { id: b.id }, data: { position: TEMP_POSITION_OFFSET + i } });
+        blockRealId[i] = b.id;
+      } else {
+        const created = await tx.surveyBlock.create({
+          data: { surveyId, position: TEMP_POSITION_OFFSET + i, blockType: 'QUESTIONS', name: b.name },
+        });
+        blockRealId[i] = created.id;
+      }
+    }
+
+    // 2. Move every surviving question to its (possibly new) block, parked
+    //    at a temp position — BEFORE any block is deleted, since a question
+    //    can only be reassigned to a block that still exists.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (q.id) {
+          await tx.question.update({
+            where: { id: q.id },
+            data: { blockId: blockRealId[i], position: TEMP_POSITION_OFFSET + qi },
+          });
+        }
+      }
+    }
+
+    // 3. Delete blocks dropped from the payload — safe now (surviving
+    //    questions were already moved out in step 2; anything left cascades,
+    //    and the pre-flight check already proved it has no responses).
+    if (blocksToDelete.length > 0) {
+      await tx.surveyBlock.deleteMany({ where: { id: { in: blocksToDelete.map((b) => b.id) } } });
+    }
+
+    // 4. Delete questions dropped from the payload whose block survived.
+    if (questionsToDelete.length > 0) {
+      await tx.question.deleteMany({ where: { id: { in: questionsToDelete.map((q) => q.id) } } });
+    }
+
+    // 5. Reposition every surviving/new block to its final position, and
+    //    write Welcome/End title+body / QUESTIONS block name.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      await tx.surveyBlock.update({
+        where: { id: blockRealId[i] },
+        data: { position: i, name: b.name, title: b.title, body: b.body },
       });
     }
-    return tx.question.update({
-      where: { id: questionId },
-      data: {
-        questionType: input.questionType,
-        prompt: input.prompt,
-        isRequired: input.isRequired,
-        ratingScaleMin: input.ratingScaleMin,
-        ratingScaleMax: input.ratingScaleMax,
-      },
-      include: { options: { orderBy: { position: 'asc' } } },
-    });
+
+    // 6. Create new questions directly at their final position (real
+    //    positions 0..N-1 in the target block were vacated by step 2's
+    //    temp-park, so no collision is possible).
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (!q.id) {
+          await tx.question.create({
+            data: {
+              surveyId,
+              blockId: blockRealId[i],
+              position: qi,
+              questionType: q.questionType,
+              prompt: q.prompt,
+              isRequired: q.isRequired,
+              ratingScaleMin: q.ratingScaleMin,
+              ratingScaleMax: q.ratingScaleMax,
+              maxChoices: q.questionType === 'MULTI_CHOICE' ? (q.maxChoices ?? 1) : 1,
+              options: q.options ? { create: q.options.map((label, idx) => ({ position: idx, label })) } : undefined,
+            },
+          });
+        }
+      }
+    }
+
+    // 7. Finalize existing questions: scalar fields + final position, and
+    //    replace options if the option list changed.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (!q.id) continue;
+        const current = currentQuestionById.get(q.id)!;
+        const currentOptionLabels = current.options.map((o) => o.label);
+        if (q.options !== undefined && !optionsEqual(q.options, currentOptionLabels)) {
+          await tx.questionOption.deleteMany({ where: { questionId: q.id } });
+          await tx.questionOption.createMany({
+            data: q.options.map((label, idx) => ({ questionId: q.id!, position: idx, label })),
+          });
+        }
+        await tx.question.update({
+          where: { id: q.id },
+          data: {
+            blockId: blockRealId[i],
+            position: qi,
+            questionType: q.questionType,
+            prompt: q.prompt,
+            isRequired: q.isRequired,
+            ratingScaleMin: q.ratingScaleMin,
+            ratingScaleMax: q.ratingScaleMax,
+            maxChoices: q.questionType === 'MULTI_CHOICE' ? (q.maxChoices ?? 1) : 1,
+          },
+        });
+      }
+    }
   });
-}
 
-export async function deleteQuestion(surveyId: string, blockId: string, questionId: string, member: Member) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  const question = await prisma.question.findFirst({ where: { id: questionId, blockId } });
-  if (!question) {
-    throw new NotFoundError('Question not found');
-  }
-  const answerCount = await countAnswersForQuestion(survey, questionId);
-  if (answerCount > 0) {
-    throw new ConflictError('QUESTION_HAS_RESPONSES', 'Cannot delete a question that already has responses.');
-  }
-  await prisma.question.delete({ where: { id: questionId } });
-}
-
-export async function reorderQuestions(surveyId: string, blockId: string, member: Member, questionIds: string[]) {
-  const survey = await assertSurveyOwnerOrAdmin(surveyId, member);
-  assertDraft(survey);
-  await getBlockOr404(surveyId, blockId);
-  const existing = await prisma.question.findMany({ where: { blockId }, select: { id: true } });
-  const existingIds = new Set(existing.map((q) => q.id));
-  if (questionIds.length !== existing.length || !questionIds.every((id) => existingIds.has(id))) {
-    throw new ValidationError('questionIds must match the full set of question ids in this block');
-  }
-  await prisma.$transaction(
-    questionIds.map((id, idx) => prisma.question.update({ where: { id }, data: { position: idx + 1000 } })),
-  );
-  await prisma.$transaction(
-    questionIds.map((id, idx) => prisma.question.update({ where: { id }, data: { position: idx } })),
-  );
+  return getSurveyDetail(surveyId, member);
 }
 
 // ===== Recipients =====

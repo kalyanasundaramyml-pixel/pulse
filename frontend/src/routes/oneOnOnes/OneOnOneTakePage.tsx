@@ -137,7 +137,7 @@ export function OneOnOneTakePage() {
                         <>
                           <ChoiceInput
                             options={q.options}
-                            multi={q.questionType === 'MULTI_CHOICE'}
+                            maxChoices={q.maxChoices}
                             selected={answers[q.id]?.selectedOptionIds ?? []}
                             onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
                           />

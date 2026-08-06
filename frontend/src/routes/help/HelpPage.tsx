@@ -118,9 +118,10 @@ function CreatorGuide() {
           </li>
           <li>
             <strong>Question blocks</strong> — one or more named sections (e.g. "Culture", "Growth") that hold your
-            actual questions. Add, rename, reorder, or delete these freely, and reorder or delete individual
-            questions within them. Supported question types: rating scale, free text, single choice, and multiple
-            choice.
+            actual questions. Add, rename, reorder, or delete these freely; reorder a question within its block,
+            move it to a different block, or delete it. Supported question types: rating scale, free text, and
+            choice — a choice question has a <strong>Max choices</strong> field for how many options a respondent
+            can pick (1 for "pick exactly one", or more to allow multiple).
           </li>
           <li>
             <strong>End</strong> — an optional closing heading/message. Always present, can't be removed.
@@ -129,6 +130,12 @@ function CreatorGuide() {
         <p>
           The preview panel on the right always shows exactly what a respondent will see, live, as you edit — use it
           to check your wording before publishing.
+        </p>
+        <p>
+          Nothing in the builder is saved automatically — click <strong>Save</strong> when you're happy with your
+          changes, or <strong>Discard changes</strong> to throw them away. Deleting a block or question asks you to
+          confirm first. If you try to leave the page (another nav link, the browser's Back button, or closing the
+          tab) while you have unsaved changes, you'll be asked to confirm before they're lost.
         </p>
       </Section>
 
@@ -479,8 +486,9 @@ function Faq() {
       </FaqItem>
       <FaqItem q="Can I edit a question after people have already answered it?">
         <p>
-          You can edit its wording, but you can't change its type or options, and you can't delete it, once it has
-          at least one response — this protects the answers already collected.
+          You can edit its wording, and you can still move it to a different block, but you can't change its type,
+          options, or max choices, and you can't delete it, once it has at least one response — this protects the
+          answers already collected.
         </p>
       </FaqItem>
       <FaqItem q="What happens when a survey's end date passes?">
@@ -521,10 +529,11 @@ function Faq() {
           only ever grants other Creators read access and the ability to copy it, never edit access to the original.
         </p>
       </FaqItem>
-      <FaqItem q="What does 'Discard changes' do on a template?">
+      <FaqItem q="What does 'Discard changes' do in the builder?">
         <p>
-          It reverts every unsaved edit on the page — title, description, and any block or question text you were
-          mid-typing — back to whatever was last saved. It doesn't delete the template itself; use Delete for that.
+          It reverts every unsaved edit on the page — title, description, and any block or question you added,
+          edited, reordered, moved, or deleted — back to whatever was last saved. It doesn't delete the survey,
+          template, or 1:1 itself; use Delete for that.
         </p>
       </FaqItem>
     </div>

@@ -1,13 +1,10 @@
 import { useState } from 'react';
-import { Question, QuestionType } from '../../types/api';
-import { QuestionInput } from '../../api/surveys';
-import { ApiError } from '../../api/client';
+import { DraftQuestion, DraftQuestionType } from '../../types/draft';
 
-const TYPE_LABELS: Record<QuestionType, string> = {
+const TYPE_LABELS: Record<DraftQuestionType, string> = {
   RATING: 'Rating scale',
   TEXT: 'Free text',
-  SINGLE_CHOICE: 'Single choice',
-  MULTI_CHOICE: 'Multiple choice',
+  MULTI_CHOICE: 'Choice',
 };
 
 export function QuestionEditor({
@@ -15,20 +12,20 @@ export function QuestionEditor({
   onSubmit,
   onCancel,
 }: {
-  existingQuestion?: Question;
-  onSubmit: (input: QuestionInput) => Promise<void>;
+  existingQuestion?: DraftQuestion;
+  onSubmit: (input: Omit<DraftQuestion, 'clientId' | 'id'>) => void;
   onCancel?: () => void;
 }) {
   const isEditing = !!existingQuestion;
-  const [questionType, setQuestionType] = useState<QuestionType>(existingQuestion?.questionType ?? 'RATING');
+  const [questionType, setQuestionType] = useState<DraftQuestionType>(existingQuestion?.questionType ?? 'RATING');
   const [prompt, setPrompt] = useState(existingQuestion?.prompt ?? '');
   const [isRequired, setIsRequired] = useState(existingQuestion?.isRequired ?? true);
   const [ratingMin, setRatingMin] = useState(existingQuestion?.ratingScaleMin ?? 1);
   const [ratingMax, setRatingMax] = useState(existingQuestion?.ratingScaleMax ?? 5);
   const [options, setOptions] = useState(
-    existingQuestion && existingQuestion.options.length > 0 ? existingQuestion.options.map((o) => o.label) : ['', ''],
+    existingQuestion?.options && existingQuestion.options.length > 0 ? existingQuestion.options : ['', ''],
   );
-  const [submitting, setSubmitting] = useState(false);
+  const [maxChoices, setMaxChoices] = useState(existingQuestion?.maxChoices ?? 1);
   const [error, setError] = useState<string | null>(null);
 
   function updateOption(idx: number, value: string) {
@@ -43,14 +40,14 @@ export function QuestionEditor({
     setOptions((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!prompt.trim()) {
       setError('Question prompt is required');
       return;
     }
-    const input: QuestionInput = { questionType, prompt: prompt.trim(), isRequired };
+    const input: Omit<DraftQuestion, 'clientId' | 'id'> = { questionType, prompt: prompt.trim(), isRequired };
     if (questionType === 'RATING') {
       if (ratingMin >= ratingMax) {
         setError('Rating min must be less than max');
@@ -59,25 +56,24 @@ export function QuestionEditor({
       input.ratingScaleMin = ratingMin;
       input.ratingScaleMax = ratingMax;
     }
-    if (questionType === 'SINGLE_CHOICE' || questionType === 'MULTI_CHOICE') {
+    if (questionType === 'MULTI_CHOICE') {
       const cleaned = options.map((o) => o.trim()).filter(Boolean);
       if (cleaned.length < 2) {
         setError('Choice questions need at least 2 options');
         return;
       }
-      input.options = cleaned;
-    }
-    setSubmitting(true);
-    try {
-      await onSubmit(input);
-      if (!isEditing) {
-        setPrompt('');
-        setOptions(['', '']);
+      if (maxChoices < 1 || maxChoices > cleaned.length) {
+        setError('Max choices must be between 1 and the number of options');
+        return;
       }
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to save question');
-    } finally {
-      setSubmitting(false);
+      input.options = cleaned;
+      input.maxChoices = maxChoices;
+    }
+    onSubmit(input);
+    if (!isEditing) {
+      setPrompt('');
+      setOptions(['', '']);
+      setMaxChoices(1);
     }
   }
 
@@ -85,7 +81,7 @@ export function QuestionEditor({
     <form className="question-editor" onSubmit={handleSubmit}>
       <label>
         Question type
-        <select value={questionType} onChange={(e) => setQuestionType(e.target.value as QuestionType)}>
+        <select value={questionType} onChange={(e) => setQuestionType(e.target.value as DraftQuestionType)}>
           {Object.entries(TYPE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
@@ -115,7 +111,7 @@ export function QuestionEditor({
         </div>
       )}
 
-      {(questionType === 'SINGLE_CHOICE' || questionType === 'MULTI_CHOICE') && (
+      {questionType === 'MULTI_CHOICE' && (
         <div className="option-fields">
           {options.map((opt, idx) => (
             <div key={idx} className="option-field-row">
@@ -131,17 +127,30 @@ export function QuestionEditor({
               )}
             </div>
           ))}
-          <button type="button" onClick={addOptionField}>
+          <button type="button" className="add-option-button" onClick={addOptionField}>
             + Add option
           </button>
+        </div>
+      )}
+      {questionType === 'MULTI_CHOICE' && (
+        <div className="max-choices-field">
+          <label>
+            Max choices
+            <input
+              type="number"
+              min={1}
+              max={Math.max(2, options.filter((o) => o.trim()).length)}
+              value={maxChoices}
+              onChange={(e) => setMaxChoices(Number(e.target.value))}
+            />
+          </label>
+          <p className="muted">How many options can a respondent pick? Use 1 for "pick exactly one".</p>
         </div>
       )}
 
       {error && <p className="form-error">{error}</p>}
       <div className="survey-actions">
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Saving...' : isEditing ? 'Save changes' : 'Add question'}
-        </button>
+        <button type="submit">{isEditing ? 'Save changes' : 'Add question'}</button>
         {onCancel && (
           <button type="button" onClick={onCancel}>
             Cancel

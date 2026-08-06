@@ -1,24 +1,7 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
-import { Block, Question } from '../../types/api';
-import { QuestionInput } from '../../api/surveys';
+import { useEffect, useRef, useState } from 'react';
+import { DraftBlock, DraftQuestion } from '../../types/draft';
+import { newDraftBlock, newDraftQuestion } from '../../lib/draft';
 import { QuestionEditor } from './QuestionEditor';
-import { ApiError } from '../../api/client';
-
-export interface BlockApi {
-  addBlock: (name: string) => Promise<unknown>;
-  updateBlock: (blockId: string, input: { name?: string; title?: string; body?: string }) => Promise<unknown>;
-  deleteBlock: (blockId: string) => Promise<unknown>;
-  reorderBlocks: (blockIds: string[]) => Promise<unknown>;
-  addQuestion: (blockId: string, input: QuestionInput) => Promise<unknown>;
-  updateQuestion: (blockId: string, questionId: string, input: Partial<QuestionInput>) => Promise<unknown>;
-  deleteQuestion: (blockId: string, questionId: string) => Promise<unknown>;
-  reorderQuestions: (blockId: string, questionIds: string[]) => Promise<unknown>;
-}
-
-export interface BlockListHandle {
-  flush: () => Promise<void>;
-  discard: () => void;
-}
 
 function ChevronUpIcon() {
   return (
@@ -64,76 +47,111 @@ function PencilIcon() {
   );
 }
 
-// When deferSave is true, edits are held locally (reported via onDraftChange) instead
-// of persisted on blur — the parent decides when to flush() or discard() them, so a
-// block-text edit shows up in the same Save/Discard workflow as the title/description.
-function BlockNameInput({
-  block,
-  deferSave,
-  onSave,
-  onDraftChange,
+// Two stacked blocks with an item dropping from one into the other — reads
+// as "move to another block" at a glance, rather than a generic arrow.
+function MoveToBlockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="3" y="3" width="15" height="5" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="3" y="13" width="15" height="5" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <path d="M18 5.5h3.5v10h-3.5M19 13.7 18 15.5 19 17.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MoveToBlockButton({
+  currentBlockClientId,
+  questionBlocks,
+  onMove,
 }: {
-  block: Block;
-  deferSave: boolean;
-  onSave: (name: string) => void;
-  onDraftChange?: (name: string) => void;
+  currentBlockClientId: string;
+  questionBlocks: DraftBlock[];
+  onMove: (toBlockClientId: string) => void;
 }) {
-  const [name, setName] = useState(block.name ?? '');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const otherBlocks = questionBlocks.filter((b) => b.clientId !== currentBlockClientId);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  if (otherBlocks.length === 0) return null;
+
+  return (
+    <div className="move-to-block" ref={containerRef}>
+      <button
+        type="button"
+        className="icon-button"
+        aria-label="Move to block"
+        title="Move to block"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <MoveToBlockIcon />
+      </button>
+      {open && (
+        <div className="move-to-block-menu" role="menu">
+          <div className="move-to-block-menu-label">Move to</div>
+          {otherBlocks.map((b) => (
+            <button
+              type="button"
+              role="menuitem"
+              className="move-to-block-menu-item"
+              key={b.clientId}
+              onClick={() => {
+                onMove(b.clientId);
+                setOpen(false);
+              }}
+            >
+              {b.name || 'Untitled block'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlockNameInput({ block, onChange }: { block: DraftBlock; onChange: (name: string) => void }) {
   return (
     <input
       className="block-name-input"
-      value={name}
-      onChange={(e) => {
-        setName(e.target.value);
-        if (deferSave) onDraftChange?.(e.target.value);
-      }}
-      onBlur={() => {
-        if (deferSave) return;
-        if (name.trim() && name.trim() !== block.name) onSave(name.trim());
-      }}
+      value={block.name ?? ''}
+      onChange={(e) => onChange(e.target.value)}
     />
   );
 }
 
 function BlockTextEditor({
   block,
-  deferSave,
-  onSave,
-  onDraftChange,
+  onChange,
 }: {
-  block: Block;
-  deferSave: boolean;
-  onSave: (input: { title: string; body: string }) => void;
-  onDraftChange?: (input: { title: string; body: string }) => void;
+  block: DraftBlock;
+  onChange: (input: { title: string; body: string }) => void;
 }) {
-  const [title, setTitle] = useState(block.title ?? '');
-  const [body, setBody] = useState(block.body ?? '');
   return (
     <div className="block-text-editor">
       <label>
         Heading
         <input
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            if (deferSave) onDraftChange?.({ title: e.target.value, body });
-          }}
-          onBlur={() => {
-            if (!deferSave) onSave({ title, body });
-          }}
+          value={block.title ?? ''}
+          onChange={(e) => onChange({ title: e.target.value, body: block.body ?? '' })}
         />
       </label>
       <label>
         Message
         <textarea
-          value={body}
-          onChange={(e) => {
-            setBody(e.target.value);
-            if (deferSave) onDraftChange?.({ title, body: e.target.value });
-          }}
-          onBlur={() => {
-            if (!deferSave) onSave({ title, body });
-          }}
+          value={block.body ?? ''}
+          onChange={(e) => onChange({ title: block.title ?? '', body: e.target.value })}
           rows={3}
         />
       </label>
@@ -141,116 +159,128 @@ function BlockTextEditor({
   );
 }
 
-export const BlockList = forwardRef<
-  BlockListHandle,
-  {
-    blocks: Block[];
-    api: BlockApi;
-    editable: boolean;
-    onChanged: () => void | Promise<void>;
-    deferSave?: boolean;
-    onDirtyChange?: (dirty: boolean) => void;
-  }
->(function BlockList({ blocks, api, editable, onChanged, deferSave = false, onDirtyChange }, ref) {
-  const [editingQuestion, setEditingQuestion] = useState<{ blockId: string; question: Question } | null>(null);
+export function BlockList({
+  blocks,
+  editable,
+  onChange,
+}: {
+  blocks: DraftBlock[];
+  editable: boolean;
+  onChange: (next: DraftBlock[]) => void;
+}) {
+  const [editingQuestion, setEditingQuestion] = useState<{ blockClientId: string; question: DraftQuestion } | null>(
+    null,
+  );
   const [newBlockName, setNewBlockName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [resetKey, setResetKey] = useState(0);
-  const pendingText = useRef<Record<string, { title: string; body: string }>>({});
-  const pendingNames = useRef<Record<string, string>>({});
 
-  const sorted = [...blocks].sort((a, b) => a.position - b.position);
+  const sorted = blocks; // order in the array IS the position — parent owns ordering
   const welcome = sorted.find((b) => b.blockType === 'WELCOME');
   const end = sorted.find((b) => b.blockType === 'END');
   const questionBlocks = sorted.filter((b) => b.blockType === 'QUESTIONS');
 
-  function markDirty(blockId: string, patch: { title?: string; body?: string; name?: string }) {
-    if (patch.name !== undefined) pendingNames.current[blockId] = patch.name;
-    if (patch.title !== undefined || patch.body !== undefined) {
-      const existing = pendingText.current[blockId] ?? { title: '', body: '' };
-      pendingText.current[blockId] = { ...existing, ...patch };
-    }
-    onDirtyChange?.(true);
+  function updateBlock(blockClientId: string, patch: Partial<DraftBlock>) {
+    onChange(blocks.map((b) => (b.clientId === blockClientId ? { ...b, ...patch } : b)));
   }
 
-  async function flush() {
-    const blockIds = new Set([...Object.keys(pendingText.current), ...Object.keys(pendingNames.current)]);
-    for (const blockId of blockIds) {
-      const input: { name?: string; title?: string; body?: string } = {};
-      const textPatch = pendingText.current[blockId];
-      const namePatch = pendingNames.current[blockId];
-      if (textPatch) {
-        input.title = textPatch.title;
-        input.body = textPatch.body;
-      }
-      if (namePatch !== undefined) input.name = namePatch;
-      await api.updateBlock(blockId, input);
-    }
-    pendingText.current = {};
-    pendingNames.current = {};
-    onDirtyChange?.(false);
-    await onChanged();
-  }
-
-  function discard() {
-    pendingText.current = {};
-    pendingNames.current = {};
-    onDirtyChange?.(false);
-    setResetKey((k) => k + 1);
-  }
-
-  useImperativeHandle(ref, () => ({ flush, discard }));
-
-  async function run(fn: () => Promise<unknown>) {
-    setError(null);
-    try {
-      await fn();
-      await onChanged();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong');
-    }
-  }
-
-  async function handleMoveBlock(blockId: string, direction: -1 | 1) {
-    const idx = questionBlocks.findIndex((b) => b.id === blockId);
-    const swapIdx = idx + direction;
-    if (swapIdx < 0 || swapIdx >= questionBlocks.length) return;
-    const order = questionBlocks.map((b) => b.id);
-    [order[idx], order[swapIdx]] = [order[swapIdx], order[idx]];
-    await run(() => api.reorderBlocks(order));
-  }
-
-  async function handleMoveQuestion(block: Block, questionId: string, direction: -1 | 1) {
-    const idx = block.questions.findIndex((q) => q.id === questionId);
-    const swapIdx = idx + direction;
-    if (swapIdx < 0 || swapIdx >= block.questions.length) return;
-    const order = block.questions.map((q) => q.id);
-    [order[idx], order[swapIdx]] = [order[swapIdx], order[idx]];
-    await run(() => api.reorderQuestions(block.id, order));
-  }
-
-  async function handleAddBlock(e: React.FormEvent) {
+  function handleAddBlock(e: React.FormEvent) {
     e.preventDefault();
     if (!newBlockName.trim()) return;
-    await run(() => api.addBlock(newBlockName.trim()));
+    const endIdx = blocks.findIndex((b) => b.blockType === 'END');
+    const next = [...blocks];
+    next.splice(endIdx, 0, newDraftBlock(newBlockName.trim()));
+    onChange(next);
     setNewBlockName('');
+  }
+
+  function handleDeleteBlock(blockClientId: string) {
+    const block = blocks.find((b) => b.clientId === blockClientId);
+    const label = block?.name || 'this block';
+    const questionCount = block?.questions.length ?? 0;
+    const warning =
+      questionCount > 0
+        ? `Delete "${label}" and its ${questionCount} question${questionCount === 1 ? '' : 's'}?`
+        : `Delete "${label}"?`;
+    if (!window.confirm(warning)) return;
+    onChange(blocks.filter((b) => b.clientId !== blockClientId));
+  }
+
+  function handleMoveBlock(blockClientId: string, direction: -1 | 1) {
+    const idx = questionBlocks.findIndex((b) => b.clientId === blockClientId);
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= questionBlocks.length) return;
+    const reordered = [...questionBlocks];
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    onChange(welcome ? [welcome, ...reordered, ...(end ? [end] : [])] : [...reordered, ...(end ? [end] : [])]);
+  }
+
+  function updateQuestionsInBlock(blockClientId: string, questions: DraftQuestion[]) {
+    updateBlock(blockClientId, { questions });
+  }
+
+  function handleAddQuestion(blockClientId: string, input: Omit<DraftQuestion, 'clientId' | 'id'>) {
+    const block = blocks.find((b) => b.clientId === blockClientId);
+    if (!block) return;
+    updateQuestionsInBlock(blockClientId, [...block.questions, { ...newDraftQuestion(), ...input }]);
+  }
+
+  function handleUpdateQuestion(
+    blockClientId: string,
+    questionClientId: string,
+    input: Omit<DraftQuestion, 'clientId' | 'id'>,
+  ) {
+    const block = blocks.find((b) => b.clientId === blockClientId);
+    if (!block) return;
+    updateQuestionsInBlock(
+      blockClientId,
+      block.questions.map((q) => (q.clientId === questionClientId ? { ...q, ...input } : q)),
+    );
+  }
+
+  function handleDeleteQuestion(blockClientId: string, questionClientId: string) {
+    const block = blocks.find((b) => b.clientId === blockClientId);
+    if (!block) return;
+    const question = block.questions.find((q) => q.clientId === questionClientId);
+    const label = question?.prompt || 'this question';
+    if (!window.confirm(`Delete "${label}"?`)) return;
+    updateQuestionsInBlock(
+      blockClientId,
+      block.questions.filter((q) => q.clientId !== questionClientId),
+    );
+  }
+
+  function handleMoveQuestion(block: DraftBlock, questionClientId: string, direction: -1 | 1) {
+    const idx = block.questions.findIndex((q) => q.clientId === questionClientId);
+    const swapIdx = idx + direction;
+    if (swapIdx < 0 || swapIdx >= block.questions.length) return;
+    const reordered = [...block.questions];
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    updateQuestionsInBlock(block.clientId, reordered);
+  }
+
+  function handleMoveQuestionToBlock(fromBlockClientId: string, questionClientId: string, toBlockClientId: string) {
+    const fromBlock = blocks.find((b) => b.clientId === fromBlockClientId);
+    const question = fromBlock?.questions.find((q) => q.clientId === questionClientId);
+    if (!fromBlock || !question) return;
+    onChange(
+      blocks.map((b) => {
+        if (b.clientId === fromBlockClientId) {
+          return { ...b, questions: b.questions.filter((q) => q.clientId !== questionClientId) };
+        }
+        if (b.clientId === toBlockClientId) {
+          return { ...b, questions: [...b.questions, question] };
+        }
+        return b;
+      }),
+    );
   }
 
   return (
     <div className="block-list">
-      {error && <p className="form-error">{error}</p>}
-
       {welcome && (
         <section className="block-card">
           <h3>Welcome</h3>
           {editable ? (
-            <BlockTextEditor
-              key={`${welcome.id}-${resetKey}`}
-              block={welcome}
-              deferSave={deferSave}
-              onSave={(input) => run(() => api.updateBlock(welcome.id, input))}
-              onDraftChange={(input) => markDirty(welcome.id, input)}
-            />
+            <BlockTextEditor block={welcome} onChange={(input) => updateBlock(welcome.clientId, input)} />
           ) : (
             <>
               {welcome.title && <p className="block-title-display">{welcome.title}</p>}
@@ -261,18 +291,12 @@ export const BlockList = forwardRef<
       )}
 
       {questionBlocks.map((block, idx) => {
-        const isEditingThisBlock = editingQuestion?.blockId === block.id;
+        const isEditingThisBlock = editingQuestion?.blockClientId === block.clientId;
         return (
-          <section className="block-card" key={block.id}>
+          <section className="block-card" key={block.clientId}>
             <div className="block-header">
               {editable ? (
-                <BlockNameInput
-                  key={`${block.id}-${resetKey}`}
-                  block={block}
-                  deferSave={deferSave}
-                  onSave={(name) => run(() => api.updateBlock(block.id, { name }))}
-                  onDraftChange={(name) => markDirty(block.id, { name })}
-                />
+                <BlockNameInput block={block} onChange={(name) => updateBlock(block.clientId, { name })} />
               ) : (
                 <h3>{block.name}</h3>
               )}
@@ -283,7 +307,7 @@ export const BlockList = forwardRef<
                     className="icon-button"
                     aria-label="Move block up"
                     title="Move block up"
-                    onClick={() => handleMoveBlock(block.id, -1)}
+                    onClick={() => handleMoveBlock(block.clientId, -1)}
                     disabled={idx === 0}
                   >
                     <ChevronUpIcon />
@@ -293,7 +317,7 @@ export const BlockList = forwardRef<
                     className="icon-button"
                     aria-label="Move block down"
                     title="Move block down"
-                    onClick={() => handleMoveBlock(block.id, 1)}
+                    onClick={() => handleMoveBlock(block.clientId, 1)}
                     disabled={idx === questionBlocks.length - 1}
                   >
                     <ChevronDownIcon />
@@ -303,7 +327,7 @@ export const BlockList = forwardRef<
                     className="icon-button"
                     aria-label="Delete block"
                     title="Delete block"
-                    onClick={() => run(() => api.deleteBlock(block.id))}
+                    onClick={() => handleDeleteBlock(block.clientId)}
                   >
                     <TrashIcon />
                   </button>
@@ -312,7 +336,7 @@ export const BlockList = forwardRef<
             </div>
             <ul className="question-list">
               {block.questions.map((q, qIdx) => (
-                <li key={q.id}>
+                <li key={q.clientId}>
                   <span className="question-type-tag">{q.questionType}</span>
                   <span>{q.prompt}</span>
                   {editable && (
@@ -322,7 +346,7 @@ export const BlockList = forwardRef<
                         className="icon-button"
                         aria-label="Move question up"
                         title="Move question up"
-                        onClick={() => handleMoveQuestion(block, q.id, -1)}
+                        onClick={() => handleMoveQuestion(block, q.clientId, -1)}
                         disabled={qIdx === 0}
                       >
                         <ChevronUpIcon />
@@ -332,17 +356,22 @@ export const BlockList = forwardRef<
                         className="icon-button"
                         aria-label="Move question down"
                         title="Move question down"
-                        onClick={() => handleMoveQuestion(block, q.id, 1)}
+                        onClick={() => handleMoveQuestion(block, q.clientId, 1)}
                         disabled={qIdx === block.questions.length - 1}
                       >
                         <ChevronDownIcon />
                       </button>
+                      <MoveToBlockButton
+                        currentBlockClientId={block.clientId}
+                        questionBlocks={questionBlocks}
+                        onMove={(toBlockClientId) => handleMoveQuestionToBlock(block.clientId, q.clientId, toBlockClientId)}
+                      />
                       <button
                         type="button"
                         className="icon-button"
                         aria-label="Edit question"
                         title="Edit question"
-                        onClick={() => setEditingQuestion({ blockId: block.id, question: q })}
+                        onClick={() => setEditingQuestion({ blockClientId: block.clientId, question: q })}
                       >
                         <PencilIcon />
                       </button>
@@ -351,7 +380,7 @@ export const BlockList = forwardRef<
                         className="icon-button"
                         aria-label="Delete question"
                         title="Delete question"
-                        onClick={() => run(() => api.deleteQuestion(block.id, q.id))}
+                        onClick={() => handleDeleteQuestion(block.clientId, q.clientId)}
                       >
                         <TrashIcon />
                       </button>
@@ -362,18 +391,17 @@ export const BlockList = forwardRef<
             </ul>
             {editable && isEditingThisBlock && (
               <QuestionEditor
-                key={editingQuestion.question.id}
+                key={editingQuestion.question.clientId}
                 existingQuestion={editingQuestion.question}
-                onSubmit={async (input) => {
-                  await api.updateQuestion(block.id, editingQuestion.question.id, input);
+                onSubmit={(input) => {
+                  handleUpdateQuestion(block.clientId, editingQuestion.question.clientId, input);
                   setEditingQuestion(null);
-                  await onChanged();
                 }}
                 onCancel={() => setEditingQuestion(null)}
               />
             )}
             {editable && !isEditingThisBlock && (
-              <QuestionEditor onSubmit={async (input) => { await api.addQuestion(block.id, input); await onChanged(); }} />
+              <QuestionEditor onSubmit={(input) => handleAddQuestion(block.clientId, input)} />
             )}
           </section>
         );
@@ -394,13 +422,7 @@ export const BlockList = forwardRef<
         <section className="block-card">
           <h3>End</h3>
           {editable ? (
-            <BlockTextEditor
-              key={`${end.id}-${resetKey}`}
-              block={end}
-              deferSave={deferSave}
-              onSave={(input) => run(() => api.updateBlock(end.id, input))}
-              onDraftChange={(input) => markDirty(end.id, input)}
-            />
+            <BlockTextEditor block={end} onChange={(input) => updateBlock(end.clientId, input)} />
           ) : (
             <>
               {end.title && <p className="block-title-display">{end.title}</p>}
@@ -411,4 +433,4 @@ export const BlockList = forwardRef<
       )}
     </div>
   );
-});
+}

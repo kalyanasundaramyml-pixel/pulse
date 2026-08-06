@@ -157,9 +157,13 @@ name?, title?, body?, createdAt, updatedAt`, `@@unique([surveyId, position])`.
 **`Question`** — belongs to a `SurveyBlock`. `id, surveyId, blockId,
 position, questionType (enum: RATING|TEXT|SINGLE_CHOICE|MULTI_CHOICE),
 prompt, isRequired (default true), ratingScaleMin?, ratingScaleMax?,
-createdAt, updatedAt`. `@@unique([blockId, position])`. Has
-`QuestionOption[]` for choice types (`id, questionId, position, label`,
-`@@unique([questionId, position])`).
+maxChoices (int, default 1), createdAt, updatedAt`. `@@unique([blockId,
+position])`. Has `QuestionOption[]` for choice types (`id, questionId,
+position, label`, `@@unique([questionId, position])`). `SINGLE_CHOICE` is
+legacy-only — the builder only ever writes `MULTI_CHOICE` going forward, and
+single-vs-multi selection behavior is driven entirely by `maxChoices`
+(1 = pick exactly one) rather than the type string; kept in the enum rather
+than dropped since Postgres can't cheaply remove an enum value.
 
 **`SurveyRecipient`** — `id, surveyId, memberId, resubmitAllowed (bool,
 default false), createdAt`, `@@unique([surveyId, memberId])`.
@@ -557,10 +561,18 @@ Admin-only gates):
 - `POST /surveys`, `GET /surveys?scope=created|targeted|all|public|audit|
   viewing` (`all` is Admin-only, `audit` is Auditor-only, `viewing` is
   anyone), `GET/PATCH/DELETE /surveys/:id`, `POST /surveys/:id/{publish,
-  close,unpublish,reopen,duplicate}`, block CRUD under
-  `/surveys/:id/blocks`, question CRUD + reorder under
-  `/surveys/:id/blocks/:blockId/questions`, recipient CRUD under
-  `/surveys/:id/recipients`, `POST /surveys/:id/recipients/:memberId/reopen`.
+  close,unpublish,reopen,duplicate}`, `PUT /surveys/:id/draft` (the builder's
+  one Save action — title/description/anonymity/end date plus the entire
+  block+question tree in a single transactional call; a block/question with
+  no `id` is created, one present in the survey but missing from the payload
+  is deleted, everything else is updated in place, and a question's `blockId`
+  is simply whichever block it's nested under in the payload, which is what
+  makes moving a question between blocks free — no separate move endpoint.
+  Structural changes — type, options, or `maxChoices` — to a question that
+  already has responses are rejected with `409 QUESTION_HAS_RESPONSES` before
+  anything is written, leaving the whole draft untouched), recipient CRUD
+  under `/surveys/:id/recipients`,
+  `POST /surveys/:id/recipients/:memberId/reopen`.
 - `GET/POST /surveys/:id/viewers`, `DELETE /surveys/:id/viewers/:memberId`
   — Auditor (of that survey's Group) or Admin only; enforced in the
   service layer, since a static route-level role allow-list can't express
@@ -575,8 +587,9 @@ Admin-only gates):
   responded" + my existing answers if I have any).
 - `POST /one-on-ones`, `GET /one-on-ones?scope=created|all|public|audit`,
   `GET/PATCH/DELETE /one-on-ones/:id`, `POST /one-on-ones/:id/duplicate`,
-  question/block CRUD under `/one-on-ones/:id/blocks[/:blockId/questions]`,
-  recipient CRUD under `/one-on-ones/:id/recipients` (with the
+  `PUT /one-on-ones/:id/draft` (same one-Save-transaction shape as the
+  survey draft endpoint above, minus anonymity/end date), recipient CRUD
+  under `/one-on-ones/:id/recipients` (with the
   self-recipient block, §6.9), `POST /one-on-ones/:id/runs` (start),
   `GET /one-on-ones/:id/runs`, `GET /one-on-ones/:id/trend/:memberId` (no
   route-level role gate — a recipient may view their own trend; the

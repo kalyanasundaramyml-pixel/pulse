@@ -49,6 +49,47 @@ export async function loginAgent(app: Express, email: string, password: string) 
   return agent;
 }
 
+interface RawBlock {
+  id: string;
+  blockType: string;
+  name?: string | null;
+  title?: string | null;
+  body?: string | null;
+}
+
+// Adds one question to a survey's QUESTIONS block via the bulk draft-save
+// endpoint (the only way to mutate blocks/questions now) — fetches the
+// current tree, appends the question, and saves. Returns the save response.
+export async function addSurveyQuestion(
+  agent: Awaited<ReturnType<typeof loginAgent>>,
+  surveyId: string,
+  question: Record<string, unknown>,
+) {
+  const detail = await agent.get(`/api/surveys/${surveyId}`);
+  const { title, description, isAnonymous, endDate, blocks } = detail.body.survey as {
+    title: string;
+    description?: string;
+    isAnonymous: boolean;
+    endDate?: string;
+    blocks: RawBlock[];
+  };
+  const questionsBlock = blocks.find((b) => b.blockType === 'QUESTIONS')!;
+  return agent.put(`/api/surveys/${surveyId}/draft`).send({
+    title,
+    description: description ?? undefined,
+    isAnonymous,
+    endDate: endDate ?? undefined,
+    blocks: blocks.map((b) => ({
+      id: b.id,
+      blockType: b.blockType,
+      name: b.name ?? undefined,
+      title: b.title ?? undefined,
+      body: b.body ?? undefined,
+      questions: b.id === questionsBlock.id ? [question] : [],
+    })),
+  });
+}
+
 export async function cleanupDatabase() {
   await prisma.memberImportRowError.deleteMany();
   await prisma.memberImportBatch.deleteMany();

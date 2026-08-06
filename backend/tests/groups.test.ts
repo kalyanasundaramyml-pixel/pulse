@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/db/prisma';
-import { createMember, createGroup, loginAgent, cleanupDatabase } from './helpers';
+import { createMember, createGroup, loginAgent, cleanupDatabase, addSurveyQuestion } from './helpers';
 
 const app = createApp();
 
@@ -32,13 +32,9 @@ describe('Group-scoped Auditor oversight and Viewer grants', () => {
     expect(createRes.status).toBe(201);
     const surveyId = createRes.body.survey.id;
 
-    const surveyDetail = await creatorAgent.get(`/api/surveys/${surveyId}`);
-    const questionsBlockId = surveyDetail.body.survey.blocks.find(
-      (b: { blockType: string }) => b.blockType === 'QUESTIONS',
-    ).id;
     // At least one question is required to publish — its content isn't
     // exercised by this test (no responses are submitted).
-    await creatorAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
+    await addSurveyQuestion(creatorAgent, surveyId, {
       questionType: 'TEXT',
       prompt: 'Anything to flag?',
       isRequired: false,

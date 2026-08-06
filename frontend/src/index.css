@@ -1095,6 +1095,47 @@ label {
   flex-shrink: 0;
 }
 
+.move-to-block {
+  position: relative;
+}
+
+.move-to-block-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 150px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  padding: 4px;
+}
+
+.move-to-block-menu-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+}
+
+.move-to-block-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 400;
+  border-radius: 6px;
+}
+
+.move-to-block-menu-item:hover {
+  background: var(--brand-soft);
+  border-color: transparent;
+  color: var(--text-h);
+}
+
 /* ===== Survey builder ===== */
 
 .survey-form, .question-editor, .import-form {
@@ -1155,6 +1196,26 @@ label {
   gap: 6px;
   align-items: center;
   margin-bottom: 6px;
+}
+
+.add-option-button {
+  align-self: flex-start;
+  padding: 9px 11px;
+}
+
+.max-choices-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.max-choices-field label {
+  max-width: 160px;
+  margin-bottom: 0;
+}
+
+.max-choices-field p {
+  margin: 0;
 }
 
 .survey-actions {

@@ -1,14 +1,6 @@
 import { apiClient } from './client';
-import { Block, DirectoryMember, Question, QuestionType, Survey, SurveyDetail, SurveyStatus } from '../types/api';
-
-export interface QuestionInput {
-  questionType: QuestionType;
-  prompt: string;
-  isRequired: boolean;
-  ratingScaleMin?: number;
-  ratingScaleMax?: number;
-  options?: string[];
-}
+import { DirectoryMember, Survey, SurveyDetail, SurveyStatus } from '../types/api';
+import { blocksToPayload } from '../lib/draft';
 
 export const surveysApi = {
   create: (input: {
@@ -37,23 +29,16 @@ export const surveysApi = {
   duplicate: (id: string, asTemplate = false) =>
     apiClient.post<{ survey: Survey }>(`/surveys/${id}/duplicate`, { asTemplate }),
 
-  addBlock: (surveyId: string, name: string) =>
-    apiClient.post<{ block: Block }>(`/surveys/${surveyId}/blocks`, { name }),
-  updateBlock: (surveyId: string, blockId: string, input: { name?: string; title?: string; body?: string }) =>
-    apiClient.patch<{ block: Block }>(`/surveys/${surveyId}/blocks/${blockId}`, input),
-  deleteBlock: (surveyId: string, blockId: string) =>
-    apiClient.delete<void>(`/surveys/${surveyId}/blocks/${blockId}`),
-  reorderBlocks: (surveyId: string, blockIds: string[]) =>
-    apiClient.put<void>(`/surveys/${surveyId}/blocks/reorder`, { blockIds }),
-
-  addQuestion: (surveyId: string, blockId: string, input: QuestionInput) =>
-    apiClient.post<{ question: Question }>(`/surveys/${surveyId}/blocks/${blockId}/questions`, input),
-  updateQuestion: (surveyId: string, blockId: string, questionId: string, input: Partial<QuestionInput>) =>
-    apiClient.patch<{ question: Question }>(`/surveys/${surveyId}/blocks/${blockId}/questions/${questionId}`, input),
-  deleteQuestion: (surveyId: string, blockId: string, questionId: string) =>
-    apiClient.delete<void>(`/surveys/${surveyId}/blocks/${blockId}/questions/${questionId}`),
-  reorderQuestions: (surveyId: string, blockId: string, questionIds: string[]) =>
-    apiClient.put<void>(`/surveys/${surveyId}/blocks/${blockId}/questions/reorder`, { questionIds }),
+  saveDraft: (
+    id: string,
+    input: {
+      title: string;
+      description?: string;
+      isAnonymous?: boolean;
+      endDate?: string | null;
+      blocks: ReturnType<typeof blocksToPayload>;
+    },
+  ) => apiClient.put<{ survey: SurveyDetail }>(`/surveys/${id}/draft`, input),
 
   setRecipients: (surveyId: string, memberIds: string[]) =>
     apiClient.put<{ protectedMemberIds: string[]; message: string } | undefined>(

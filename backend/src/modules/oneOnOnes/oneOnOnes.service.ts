@@ -1,4 +1,4 @@
-import { OneOnOneBlock, OneOnOneTemplate, QuestionType, Member } from '@prisma/client';
+import { OneOnOneTemplate, Member } from '@prisma/client';
 import { prisma } from '../../db/prisma';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import {
@@ -236,6 +236,7 @@ export async function duplicateTemplate(templateId: string, member: Member, asTe
           isRequired: q.isRequired,
           ratingScaleMin: q.ratingScaleMin,
           ratingScaleMax: q.ratingScaleMax,
+          maxChoices: q.maxChoices,
           options: { create: q.options.map((o) => ({ position: o.position, label: o.label })) },
         },
       });
@@ -265,210 +266,272 @@ export async function deleteTemplate(templateId: string, member: Member) {
   await prisma.oneOnOneTemplate.delete({ where: { id: templateId } });
 }
 
-// ===== Blocks =====
-// Same Welcome -> N named QUESTIONS blocks -> End structure as Survey.
-
-async function getBlockOr404(templateId: string, blockId: string): Promise<OneOnOneBlock> {
-  const block = await prisma.oneOnOneBlock.findFirst({ where: { id: blockId, templateId } });
-  if (!block) {
-    throw new NotFoundError('Block not found');
-  }
-  return block;
-}
-
-export async function addBlock(templateId: string, member: Member, name: string) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  const blocks = await prisma.oneOnOneBlock.findMany({ where: { templateId } });
-  const endBlock = blocks.find((b) => b.blockType === 'END');
-  if (!endBlock) {
-    throw new NotFoundError('End block not found');
-  }
-  return prisma.$transaction(async (tx) => {
-    await tx.oneOnOneBlock.update({ where: { id: endBlock.id }, data: { position: endBlock.position + 1 } });
-    return tx.oneOnOneBlock.create({
-      data: { templateId, position: endBlock.position, blockType: 'QUESTIONS', name },
-    });
-  });
-}
-
-export async function updateBlock(
-  templateId: string,
-  blockId: string,
-  member: Member,
-  input: { name?: string; title?: string; body?: string },
-) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  await getBlockOr404(templateId, blockId);
-  return prisma.oneOnOneBlock.update({
-    where: { id: blockId },
-    data: { name: input.name, title: input.title, body: input.body },
-  });
-}
-
-export async function deleteBlock(templateId: string, blockId: string, member: Member) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  const block = await getBlockOr404(templateId, blockId);
-  if (block.blockType !== 'QUESTIONS') {
-    throw new ValidationError('The Welcome and End blocks cannot be deleted');
-  }
-  const questions = await prisma.oneOnOneQuestion.findMany({ where: { blockId }, select: { id: true } });
-  for (const q of questions) {
-    const answerCount = await countAnswersForQuestion(q.id);
-    if (answerCount > 0) {
-      throw new ConflictError(
-        'QUESTION_HAS_RESPONSES',
-        'Cannot delete a block containing a question that already has responses across past runs.',
-      );
-    }
-  }
-  await prisma.oneOnOneBlock.delete({ where: { id: blockId } });
-}
-
-export async function reorderBlocks(templateId: string, member: Member, blockIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  const blocks = await prisma.oneOnOneBlock.findMany({ where: { templateId } });
-  const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
-  const questionBlockIds = new Set(questionBlocks.map((b) => b.id));
-  if (blockIds.length !== questionBlocks.length || !blockIds.every((id) => questionBlockIds.has(id))) {
-    throw new ValidationError('blockIds must match the full set of question blocks on this template');
-  }
-  const welcome = blocks.find((b) => b.blockType === 'WELCOME');
-  const end = blocks.find((b) => b.blockType === 'END');
-  if (!welcome || !end) {
-    throw new NotFoundError('Welcome/End block not found');
-  }
-  const finalOrder = [welcome.id, ...blockIds, end.id];
-
-  await prisma.$transaction(
-    finalOrder.map((id, idx) => prisma.oneOnOneBlock.update({ where: { id }, data: { position: idx + 1000 } })),
-  );
-  await prisma.$transaction(
-    finalOrder.map((id, idx) => prisma.oneOnOneBlock.update({ where: { id }, data: { position: idx } })),
-  );
-}
-
-// ===== Questions =====
-
-interface QuestionInput {
-  questionType: QuestionType;
-  prompt: string;
-  isRequired: boolean;
-  ratingScaleMin?: number;
-  ratingScaleMax?: number;
-  options?: string[];
-}
+// ===== Draft save =====
+// Same Welcome -> N named QUESTIONS blocks -> End structure as Survey. Every
+// block/question add/edit/delete/reorder/move is staged client-side and
+// applied here in one transactional call — see the plan doc for the
+// position-collision-avoiding step ordering.
 
 async function countAnswersForQuestion(questionId: string): Promise<number> {
   return prisma.oneOnOneAnswer.count({ where: { questionId } });
 }
 
-export async function addQuestion(templateId: string, blockId: string, member: Member, input: QuestionInput) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  const block = await getBlockOr404(templateId, blockId);
-  if (block.blockType !== 'QUESTIONS') {
-    throw new ValidationError('Questions can only be added to a named question block');
-  }
-  const maxPosition = await prisma.oneOnOneQuestion.aggregate({ where: { blockId }, _max: { position: true } });
-  const position = (maxPosition._max.position ?? -1) + 1;
+type DraftQuestionType = 'RATING' | 'TEXT' | 'MULTI_CHOICE';
 
-  return prisma.oneOnOneQuestion.create({
-    data: {
-      templateId,
-      blockId,
-      position,
-      questionType: input.questionType,
-      prompt: input.prompt,
-      isRequired: input.isRequired,
-      ratingScaleMin: input.ratingScaleMin,
-      ratingScaleMax: input.ratingScaleMax,
-      options: input.options
-        ? { create: input.options.map((label, idx) => ({ position: idx, label })) }
-        : undefined,
-    },
-    include: { options: true },
-  });
+interface DraftQuestionInput {
+  id?: string;
+  questionType: DraftQuestionType;
+  prompt: string;
+  isRequired: boolean;
+  ratingScaleMin?: number;
+  ratingScaleMax?: number;
+  maxChoices?: number;
+  options?: string[];
 }
 
-export async function updateQuestion(
-  templateId: string,
-  blockId: string,
-  questionId: string,
-  member: Member,
-  input: Partial<QuestionInput>,
-) {
+interface DraftBlockInput {
+  id?: string;
+  blockType: 'WELCOME' | 'QUESTIONS' | 'END';
+  name?: string;
+  title?: string;
+  body?: string;
+  questions: DraftQuestionInput[];
+}
+
+interface SaveDraftInput {
+  title: string;
+  description?: string;
+  blocks: DraftBlockInput[];
+}
+
+function optionsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+const TEMP_POSITION_OFFSET = 100000;
+
+export async function saveDraft(templateId: string, member: Member, input: SaveDraftInput) {
   const template = await assertTemplateOwnerOrAdmin(templateId, member);
   assertDraft(template);
-  const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, blockId } });
-  if (!question) {
-    throw new NotFoundError('Question not found');
+
+  if (input.title !== template.title) {
+    await assertUniqueTemplateTitle(template.createdById, input.title, templateId);
   }
-  const isStructuralChange =
-    (input.questionType !== undefined && input.questionType !== question.questionType) || input.options !== undefined;
-  if (isStructuralChange) {
-    const answerCount = await countAnswersForQuestion(questionId);
-    if (answerCount > 0) {
-      throw new ConflictError(
-        'QUESTION_HAS_RESPONSES',
-        'This question already has responses across past runs, so its type/options can no longer be restructured — that would corrupt trend history. You can still edit its prompt, required flag, or rating scale.',
-      );
+
+  const currentBlocks = await prisma.oneOnOneBlock.findMany({
+    where: { templateId },
+    orderBy: { position: 'asc' },
+    include: { questions: { include: { options: { orderBy: { position: 'asc' } } } } },
+  });
+  const currentBlockById = new Map(currentBlocks.map((b) => [b.id, b]));
+  const currentQuestionById = new Map(currentBlocks.flatMap((b) => b.questions.map((q) => [q.id, q] as const)));
+
+  const welcome = currentBlocks.find((b) => b.blockType === 'WELCOME');
+  const end = currentBlocks.find((b) => b.blockType === 'END');
+  if (!welcome || !end) throw new NotFoundError('Welcome/End block not found');
+
+  // ----- structural validation of the block list shape -----
+  if (input.blocks.length < 2) {
+    throw new ValidationError('A one-on-one must have at least a Welcome and an End block');
+  }
+  const first = input.blocks[0];
+  const last = input.blocks[input.blocks.length - 1];
+  if (first.id !== welcome.id || first.blockType !== 'WELCOME') {
+    throw new ValidationError('The first block must be the existing Welcome block');
+  }
+  if (last.id !== end.id || last.blockType !== 'END') {
+    throw new ValidationError('The last block must be the existing End block');
+  }
+  const middleBlocks = input.blocks.slice(1, -1);
+  const seenBlockIds = new Set<string>();
+  for (const b of input.blocks) {
+    if (b.id) {
+      if (seenBlockIds.has(b.id)) throw new ValidationError('Duplicate block id in payload');
+      seenBlockIds.add(b.id);
+    }
+  }
+  for (const b of middleBlocks) {
+    if (b.blockType !== 'QUESTIONS') {
+      throw new ValidationError('Only named question blocks may appear between Welcome and End');
+    }
+    if (b.id && (b.id === welcome.id || b.id === end.id)) {
+      throw new ValidationError('Welcome/End blocks cannot be reordered into the middle');
+    }
+    if (b.id && !currentBlockById.has(b.id)) {
+      throw new NotFoundError(`Block ${b.id} not found`);
     }
   }
 
-  return prisma.$transaction(async (tx) => {
-    if (input.options) {
-      await tx.oneOnOneQuestionOption.deleteMany({ where: { questionId } });
-      await tx.oneOnOneQuestionOption.createMany({
-        data: input.options.map((label, idx) => ({ questionId, position: idx, label })),
+  // ----- structural validation + diff of the question list -----
+  const payloadQuestionIds = new Set<string>();
+  const seenQuestionIds = new Set<string>();
+  for (const b of input.blocks) {
+    for (const q of b.questions) {
+      if (q.id) {
+        if (seenQuestionIds.has(q.id)) throw new ValidationError('Duplicate question id in payload');
+        seenQuestionIds.add(q.id);
+        payloadQuestionIds.add(q.id);
+        if (!currentQuestionById.has(q.id)) throw new NotFoundError(`Question ${q.id} not found`);
+      }
+    }
+  }
+
+  const blocksToDelete = currentBlocks.filter((b) => b.blockType === 'QUESTIONS' && !seenBlockIds.has(b.id));
+  const questionsToDelete = [...currentQuestionById.values()].filter((q) => !payloadQuestionIds.has(q.id));
+
+  // ----- pre-flight conflict check: nothing is written until this passes -----
+  const conflicts: { questionId: string; prompt: string; reason: string }[] = [];
+  for (const q of questionsToDelete) {
+    const answerCount = await countAnswersForQuestion(q.id);
+    if (answerCount > 0) {
+      conflicts.push({ questionId: q.id, prompt: q.prompt, reason: 'has responses across past runs and cannot be deleted' });
+    }
+  }
+  for (const b of input.blocks) {
+    for (const q of b.questions) {
+      if (!q.id) continue;
+      const current = currentQuestionById.get(q.id)!;
+      const currentOptionLabels = current.options.map((o) => o.label);
+      const isStructural =
+        q.questionType !== current.questionType ||
+        (q.options !== undefined && !optionsEqual(q.options, currentOptionLabels)) ||
+        (q.questionType === 'MULTI_CHOICE' && (q.maxChoices ?? 1) !== current.maxChoices);
+      if (isStructural) {
+        const answerCount = await countAnswersForQuestion(q.id);
+        if (answerCount > 0) {
+          conflicts.push({
+            questionId: q.id,
+            prompt: q.prompt,
+            reason: 'already has responses across past runs, so its type/options/max choices can no longer change',
+          });
+        }
+      }
+    }
+  }
+  if (conflicts.length > 0) {
+    throw new ConflictError(
+      'QUESTION_HAS_RESPONSES',
+      `Cannot save — some questions already have responses: ${conflicts.map((c) => `"${c.prompt}"`).join(', ')}.`,
+      conflicts,
+    );
+  }
+
+  // ----- write transaction -----
+  await prisma.$transaction(async (tx) => {
+    await tx.oneOnOneTemplate.update({
+      where: { id: templateId },
+      data: { title: input.title, description: input.description },
+    });
+
+    // 1. Temp-park every block — existing blocks move off their current
+    //    position (which may collide with another block's final target
+    //    position later in step 5) and new blocks are created directly at a
+    //    temp position. Nothing is at its final 0..N-1 position after this.
+    const blockRealId: string[] = [];
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      if (b.id) {
+        await tx.oneOnOneBlock.update({ where: { id: b.id }, data: { position: TEMP_POSITION_OFFSET + i } });
+        blockRealId[i] = b.id;
+      } else {
+        const created = await tx.oneOnOneBlock.create({
+          data: { templateId, position: TEMP_POSITION_OFFSET + i, blockType: 'QUESTIONS', name: b.name },
+        });
+        blockRealId[i] = created.id;
+      }
+    }
+
+    // 2. Move every surviving question to its (possibly new) block, parked
+    //    at a temp position — before any block is deleted.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (q.id) {
+          await tx.oneOnOneQuestion.update({
+            where: { id: q.id },
+            data: { blockId: blockRealId[i], position: TEMP_POSITION_OFFSET + qi },
+          });
+        }
+      }
+    }
+
+    // 3. Delete blocks dropped from the payload.
+    if (blocksToDelete.length > 0) {
+      await tx.oneOnOneBlock.deleteMany({ where: { id: { in: blocksToDelete.map((b) => b.id) } } });
+    }
+
+    // 4. Delete questions dropped from the payload whose block survived.
+    if (questionsToDelete.length > 0) {
+      await tx.oneOnOneQuestion.deleteMany({ where: { id: { in: questionsToDelete.map((q) => q.id) } } });
+    }
+
+    // 5. Reposition every surviving/new block to its final position.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      await tx.oneOnOneBlock.update({
+        where: { id: blockRealId[i] },
+        data: { position: i, name: b.name, title: b.title, body: b.body },
       });
     }
-    return tx.oneOnOneQuestion.update({
-      where: { id: questionId },
-      data: {
-        questionType: input.questionType,
-        prompt: input.prompt,
-        isRequired: input.isRequired,
-        ratingScaleMin: input.ratingScaleMin,
-        ratingScaleMax: input.ratingScaleMax,
-      },
-      include: { options: { orderBy: { position: 'asc' } } },
-    });
+
+    // 6. Create new questions directly at their final position.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (!q.id) {
+          await tx.oneOnOneQuestion.create({
+            data: {
+              templateId,
+              blockId: blockRealId[i],
+              position: qi,
+              questionType: q.questionType,
+              prompt: q.prompt,
+              isRequired: q.isRequired,
+              ratingScaleMin: q.ratingScaleMin,
+              ratingScaleMax: q.ratingScaleMax,
+              maxChoices: q.questionType === 'MULTI_CHOICE' ? (q.maxChoices ?? 1) : 1,
+              options: q.options ? { create: q.options.map((label, idx) => ({ position: idx, label })) } : undefined,
+            },
+          });
+        }
+      }
+    }
+
+    // 7. Finalize existing questions: scalar fields + final position, and
+    //    replace options if the option list changed.
+    for (let i = 0; i < input.blocks.length; i++) {
+      const b = input.blocks[i];
+      for (let qi = 0; qi < b.questions.length; qi++) {
+        const q = b.questions[qi];
+        if (!q.id) continue;
+        const current = currentQuestionById.get(q.id)!;
+        const currentOptionLabels = current.options.map((o) => o.label);
+        if (q.options !== undefined && !optionsEqual(q.options, currentOptionLabels)) {
+          await tx.oneOnOneQuestionOption.deleteMany({ where: { questionId: q.id } });
+          await tx.oneOnOneQuestionOption.createMany({
+            data: q.options.map((label, idx) => ({ questionId: q.id!, position: idx, label })),
+          });
+        }
+        await tx.oneOnOneQuestion.update({
+          where: { id: q.id },
+          data: {
+            blockId: blockRealId[i],
+            position: qi,
+            questionType: q.questionType,
+            prompt: q.prompt,
+            isRequired: q.isRequired,
+            ratingScaleMin: q.ratingScaleMin,
+            ratingScaleMax: q.ratingScaleMax,
+            maxChoices: q.questionType === 'MULTI_CHOICE' ? (q.maxChoices ?? 1) : 1,
+          },
+        });
+      }
+    }
   });
-}
 
-export async function deleteQuestion(templateId: string, blockId: string, questionId: string, member: Member) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  const question = await prisma.oneOnOneQuestion.findFirst({ where: { id: questionId, blockId } });
-  if (!question) {
-    throw new NotFoundError('Question not found');
-  }
-  const answerCount = await countAnswersForQuestion(questionId);
-  if (answerCount > 0) {
-    throw new ConflictError('QUESTION_HAS_RESPONSES', 'Cannot delete a question that already has responses across past runs.');
-  }
-  await prisma.oneOnOneQuestion.delete({ where: { id: questionId } });
-}
-
-export async function reorderQuestions(templateId: string, blockId: string, member: Member, questionIds: string[]) {
-  const template = await assertTemplateOwnerOrAdmin(templateId, member);
-  assertDraft(template);
-  await getBlockOr404(templateId, blockId);
-  const existing = await prisma.oneOnOneQuestion.findMany({ where: { blockId }, select: { id: true } });
-  const existingIds = new Set(existing.map((q) => q.id));
-  if (questionIds.length !== existing.length || !questionIds.every((id) => existingIds.has(id))) {
-    throw new ValidationError('questionIds must match the full set of question ids in this block');
-  }
-  await prisma.$transaction(
-    questionIds.map((id, idx) => prisma.oneOnOneQuestion.update({ where: { id }, data: { position: idx + 1000 } })),
-  );
-  await prisma.$transaction(
-    questionIds.map((id, idx) => prisma.oneOnOneQuestion.update({ where: { id }, data: { position: idx } })),
-  );
+  return getTemplateDetail(templateId, member);
 }
 
 // ===== Recipients =====
@@ -699,8 +762,8 @@ async function validateAnswers(templateId: string, answers: AnswerInput[]) {
       if (question.isRequired && selected.length === 0) {
         throw new ValidationError(`Question "${question.prompt}" requires a selection`);
       }
-      if (question.questionType === 'SINGLE_CHOICE' && selected.length > 1) {
-        throw new ValidationError(`Question "${question.prompt}" only allows one selected option`);
+      if (selected.length > question.maxChoices) {
+        throw new ValidationError(`Question "${question.prompt}" allows at most ${question.maxChoices} selected option(s)`);
       }
       for (const optionId of selected) {
         if (!validOptionIds.has(optionId)) {
@@ -778,6 +841,7 @@ export async function getTakeRun(runId: string, member: Member) {
         isRequired: q.isRequired,
         ratingScaleMin: q.ratingScaleMin,
         ratingScaleMax: q.ratingScaleMax,
+        maxChoices: q.maxChoices,
         options: q.options.map((o) => ({ id: o.id, label: o.label })),
       })),
     })),

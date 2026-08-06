@@ -59,6 +59,7 @@ export interface Question {
   isRequired: boolean;
   ratingScaleMin: number | null;
   ratingScaleMax: number | null;
+  maxChoices: number;
   options: QuestionOption[];
 }
 

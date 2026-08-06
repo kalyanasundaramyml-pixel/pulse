@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/db/prisma';
-import { createMember, loginAgent, cleanupDatabase } from './helpers';
+import { createMember, loginAgent, cleanupDatabase, addSurveyQuestion } from './helpers';
 
 const app = createApp();
 
@@ -33,18 +33,18 @@ describe('anonymous survey response lifecycle', () => {
     expect(createRes.status).toBe(201);
     const surveyId = createRes.body.survey.id;
 
-    const surveyDetail = await creatorAgent.get(`/api/surveys/${surveyId}`);
-    const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
-
-    const questionRes = await creatorAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
+    const draftRes = await addSurveyQuestion(creatorAgent, surveyId, {
       questionType: 'RATING',
       prompt: 'How happy are you?',
       isRequired: true,
       ratingScaleMin: 1,
       ratingScaleMax: 5,
     });
-    expect(questionRes.status).toBe(201);
-    const questionId = questionRes.body.question.id;
+    expect(draftRes.status).toBe(200);
+    const questionsBlockAfter = draftRes.body.survey.blocks.find(
+      (b: { blockType: string }) => b.blockType === 'QUESTIONS',
+    );
+    const questionId = questionsBlockAfter.questions[0].id;
 
     const recipientsRes = await creatorAgent
       .put(`/api/surveys/${surveyId}/recipients`)
@@ -113,15 +113,15 @@ describe('anonymous survey response lifecycle', () => {
     const createRes = await creatorAgent.post('/api/surveys').send({ title: 'Named Feedback', isAnonymous: false });
     const surveyId = createRes.body.survey.id;
 
-    const surveyDetail = await creatorAgent.get(`/api/surveys/${surveyId}`);
-    const questionsBlockId = surveyDetail.body.survey.blocks.find((b: { blockType: string }) => b.blockType === 'QUESTIONS').id;
-
-    const questionRes = await creatorAgent.post(`/api/surveys/${surveyId}/blocks/${questionsBlockId}/questions`).send({
+    const draftRes = await addSurveyQuestion(creatorAgent, surveyId, {
       questionType: 'TEXT',
       prompt: 'Any comments?',
       isRequired: false,
     });
-    const questionId = questionRes.body.question.id;
+    const questionsBlockAfter = draftRes.body.survey.blocks.find(
+      (b: { blockType: string }) => b.blockType === 'QUESTIONS',
+    );
+    const questionId = questionsBlockAfter.questions[0].id;
 
     await creatorAgent.put(`/api/surveys/${surveyId}/recipients`).send({ memberIds: [emp1.member.id] });
     await creatorAgent.post(`/api/surveys/${surveyId}/publish`);

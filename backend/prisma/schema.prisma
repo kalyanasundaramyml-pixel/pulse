@@ -183,6 +183,7 @@ model Question {
   isRequired      Boolean      @default(true) @map("is_required")
   ratingScaleMin  Int?         @map("rating_scale_min")
   ratingScaleMax  Int?         @map("rating_scale_max")
+  maxChoices      Int          @default(1) @map("max_choices")
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
@@ -456,6 +457,7 @@ model OneOnOneQuestion {
   isRequired     Boolean      @default(true) @map("is_required")
   ratingScaleMin Int?         @map("rating_scale_min")
   ratingScaleMax Int?         @map("rating_scale_max")
+  maxChoices     Int          @default(1) @map("max_choices")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 

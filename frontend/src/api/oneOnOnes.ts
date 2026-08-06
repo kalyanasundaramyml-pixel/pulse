@@ -1,15 +1,13 @@
 import { apiClient } from './client';
 import {
   AnswerInput,
-  Block,
   OneOnOneRun,
   OneOnOneTemplate,
   OneOnOneTemplateDetail,
   OneOnOneTrendResponse,
-  Question,
   TakeOneOnOneResponse,
 } from '../types/api';
-import { QuestionInput } from './surveys';
+import { blocksToPayload } from '../lib/draft';
 
 export const oneOnOnesApi = {
   create: (input: { title: string; description?: string; isTemplate?: boolean }) =>
@@ -25,23 +23,10 @@ export const oneOnOnesApi = {
   publish: (id: string) => apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/publish`),
   unpublish: (id: string) => apiClient.post<{ template: OneOnOneTemplate }>(`/one-on-ones/${id}/unpublish`),
 
-  addBlock: (templateId: string, name: string) =>
-    apiClient.post<{ block: Block }>(`/one-on-ones/${templateId}/blocks`, { name }),
-  updateBlock: (templateId: string, blockId: string, input: { name?: string; title?: string; body?: string }) =>
-    apiClient.patch<{ block: Block }>(`/one-on-ones/${templateId}/blocks/${blockId}`, input),
-  deleteBlock: (templateId: string, blockId: string) =>
-    apiClient.delete<void>(`/one-on-ones/${templateId}/blocks/${blockId}`),
-  reorderBlocks: (templateId: string, blockIds: string[]) =>
-    apiClient.put<void>(`/one-on-ones/${templateId}/blocks/reorder`, { blockIds }),
-
-  addQuestion: (templateId: string, blockId: string, input: QuestionInput) =>
-    apiClient.post<{ question: Question }>(`/one-on-ones/${templateId}/blocks/${blockId}/questions`, input),
-  updateQuestion: (templateId: string, blockId: string, questionId: string, input: Partial<QuestionInput>) =>
-    apiClient.patch<{ question: Question }>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/${questionId}`, input),
-  deleteQuestion: (templateId: string, blockId: string, questionId: string) =>
-    apiClient.delete<void>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/${questionId}`),
-  reorderQuestions: (templateId: string, blockId: string, questionIds: string[]) =>
-    apiClient.put<void>(`/one-on-ones/${templateId}/blocks/${blockId}/questions/reorder`, { questionIds }),
+  saveDraft: (
+    id: string,
+    input: { title: string; description?: string; blocks: ReturnType<typeof blocksToPayload> },
+  ) => apiClient.put<{ template: OneOnOneTemplateDetail }>(`/one-on-ones/${id}/draft`, input),
 
   setRecipients: (templateId: string, memberIds: string[]) =>
     apiClient.put<void>(`/one-on-ones/${templateId}/recipients`, { memberIds }),

@@ -95,8 +95,10 @@ mechanism.
    - **Rating** — pick a number on a scale (e.g. 1–5), with an optional
      comment box.
    - **Text** — free-form written answer.
-   - **Single choice** / **Multi choice** — pick one or more options from a
-     list, with an optional comment box.
+   - **Choice** — pick from a list of options. Each choice question sets its
+     own limit on how many you can select (shown next to the question; "pick
+     one" is common, but a creator can allow more), with an optional comment
+     box.
    - Questions marked with `*` are required.
 4. Click **Submit response**. Once submitted, your response is locked — you
    can't edit or resubmit it, unless the survey's creator specifically
@@ -145,12 +147,30 @@ which includes Creator permissions everywhere).
    without you having to do anything (see [Editing and the publish
    lifecycle](#editing-and-the-publish-lifecycle)).
 5. Add questions with the question editor: choose a type, write the prompt,
-   mark it required or not, and (for Rating) set the scale, or (for
-   Single/Multi choice) list the options.
+   mark it required or not, and (for Rating) set the scale, or (for Choice)
+   list the options and set **Max choices** — how many a respondent can pick
+   (1 for "choose exactly one", or higher to allow multiple).
 6. Go to **Manage recipients** and add the people who should receive the
    survey (see [Recipients and Circles](#recipients-and-circles)).
 7. Click **Publish**. Publishing requires at least one question and at
    least one recipient.
+
+### Working in the builder
+
+Nothing you do in the survey/1:1 builder — editing details, adding or
+deleting a block or question, reordering, moving a question to a different
+block — is saved until you click **Save**. **Discard changes** throws away
+everything since your last save and reloads it.
+
+- Each question's move controls (chevron icons) reorder it up/down within
+  its own block; the arrow-between-boxes icon next to them opens a small
+  menu to move that question into a different block entirely.
+- Deleting a block or question asks you to confirm first, so an accidental
+  click next to the intended button (e.g. hitting delete instead of edit)
+  doesn't lose your work.
+- If you try to leave the page — clicking another nav link, using the
+  browser's Back button, or closing the tab — while you have unsaved
+  changes, you'll get a "leave without saving?" prompt first.
 
 ### Editing and the publish lifecycle
 
@@ -169,10 +189,11 @@ Even after publishing, you're not stuck:
   `DRAFT` so you can change questions, details, or recipients, then
   **Publish** again when ready. The one thing this can never change is the
   anonymous/attributed flag, once the survey has ever been published.
-- A question that already has at least one answer can't have its type or
-  options changed, and can't be deleted — this protects the integrity of
-  responses already collected. You can still edit its prompt, required
-  flag, or rating scale.
+- A question that already has at least one answer can't have its type,
+  options, or max choices changed, and can't be deleted — this protects the
+  integrity of responses already collected. You can still edit its prompt,
+  required flag, or rating scale, and you can always move it to a different
+  block.
 - **Close** — manually closes a `PUBLISHED` survey.
 - **End date** — set on the survey; once that date passes, the survey
   auto-closes the next time anyone touches it, no action needed from you.
@@ -264,8 +285,8 @@ published):
 ### 1:1 templates and trends
 
 - Editing a question that already has answers is limited the same way as
-  surveys (can't change its type/options once it has responses), to keep
-  historical trend data meaningful.
+  surveys (can't change its type, options, or max choices once it has
+  responses), to keep historical trend data meaningful.
 - **Archive** a template you're not actively using anymore (it stays around
   for history but is tucked out of the way); **Unarchive** to bring it
   back.

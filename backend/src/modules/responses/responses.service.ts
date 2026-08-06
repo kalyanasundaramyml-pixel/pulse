@@ -49,8 +49,8 @@ async function validateAnswers(surveyId: string, answers: AnswerInput[]) {
       if (question.isRequired && selected.length === 0) {
         throw new ValidationError(`Question "${question.prompt}" requires a selection`);
       }
-      if (question.questionType === 'SINGLE_CHOICE' && selected.length > 1) {
-        throw new ValidationError(`Question "${question.prompt}" only allows one selected option`);
+      if (selected.length > question.maxChoices) {
+        throw new ValidationError(`Question "${question.prompt}" allows at most ${question.maxChoices} selected option(s)`);
       }
       for (const optionId of selected) {
         if (!validOptionIds.has(optionId)) {
@@ -106,6 +106,7 @@ export async function getTakeSurvey(surveyId: string, member: Member) {
         isRequired: q.isRequired,
         ratingScaleMin: q.ratingScaleMin,
         ratingScaleMax: q.ratingScaleMax,
+        maxChoices: q.maxChoices,
         options: q.options.map((o) => ({ id: o.id, label: o.label })),
       })),
     })),

@@ -1,5 +1,6 @@
 import { ReactNode, useState } from 'react';
-import { AnswerInput, Block } from '../../types/api';
+import { AnswerInput } from '../../types/api';
+import { DraftBlock } from '../../types/draft';
 import { RatingInput } from './RatingInput';
 import { ChoiceInput } from './ChoiceInput';
 import { TextInput } from './TextInput';
@@ -8,7 +9,8 @@ import { CommentField } from './CommentField';
 // Renders the exact same markup/components/CSS classes as the real take
 // pages (SurveyTakePage / OneOnOneTakePage) so this is a true preview, not
 // an approximation — anything that renders here is what a respondent will
-// actually see, laid out the same way.
+// actually see, laid out the same way. Takes the in-progress draft (not the
+// last-saved survey) so edits show up here live, before Save is clicked.
 export function BuilderPreviewPanel({
   title,
   description,
@@ -18,7 +20,7 @@ export function BuilderPreviewPanel({
 }: {
   title: string;
   description?: string | null;
-  blocks: Block[];
+  blocks: DraftBlock[];
   topNote?: ReactNode;
   submitLabel?: string;
 }) {
@@ -28,10 +30,11 @@ export function BuilderPreviewPanel({
     setAnswers((prev) => ({ ...prev, [questionId]: { ...prev[questionId], ...patch, questionId } }));
   }
 
-  const sorted = [...blocks].sort((a, b) => a.position - b.position);
-  const welcome = sorted.find((b) => b.blockType === 'WELCOME');
-  const end = sorted.find((b) => b.blockType === 'END');
-  const questionBlocks = sorted.filter((b) => b.blockType === 'QUESTIONS');
+  // Draft arrays are already in visual order (no explicit position field —
+  // array order IS the order), unlike the persisted Block[] this used to take.
+  const welcome = blocks.find((b) => b.blockType === 'WELCOME');
+  const end = blocks.find((b) => b.blockType === 'END');
+  const questionBlocks = blocks.filter((b) => b.blockType === 'QUESTIONS');
 
   return (
     <div className="builder-preview">
@@ -50,50 +53,56 @@ export function BuilderPreviewPanel({
           )}
 
           {questionBlocks.map((block) => (
-            <div className="question-form" key={block.id}>
+            <div className="question-form" key={block.clientId}>
               {block.name && <h2 className="take-block-heading">{block.name}</h2>}
-              {block.questions.map((q) => (
-                <div className="question-block" key={q.id}>
-                  <label>
-                    {q.prompt || <span className="muted">(no prompt yet)</span>}{' '}
-                    {q.isRequired && <span className="required">*</span>}
-                  </label>
-                  {q.questionType === 'RATING' && (
-                    <>
-                      <RatingInput
-                        min={q.ratingScaleMin ?? 1}
-                        max={q.ratingScaleMax ?? 5}
-                        value={answers[q.id]?.ratingValue}
-                        onChange={(value) => updateAnswer(q.id, { ratingValue: value })}
+              {block.questions.map((q) => {
+                // Draft options are just label strings (no id until saved) —
+                // synthesize one from index for this preview-only selection
+                // state; nothing here ever submits to the server.
+                const previewOptions = (q.options ?? []).map((label, idx) => ({ id: String(idx), label }));
+                return (
+                  <div className="question-block" key={q.clientId}>
+                    <label>
+                      {q.prompt || <span className="muted">(no prompt yet)</span>}{' '}
+                      {q.isRequired && <span className="required">*</span>}
+                    </label>
+                    {q.questionType === 'RATING' && (
+                      <>
+                        <RatingInput
+                          min={q.ratingScaleMin ?? 1}
+                          max={q.ratingScaleMax ?? 5}
+                          value={answers[q.clientId]?.ratingValue}
+                          onChange={(value) => updateAnswer(q.clientId, { ratingValue: value })}
+                        />
+                        <CommentField
+                          value={answers[q.clientId]?.commentText ?? ''}
+                          onChange={(commentText) => updateAnswer(q.clientId, { commentText })}
+                        />
+                      </>
+                    )}
+                    {q.questionType === 'TEXT' && (
+                      <TextInput
+                        value={answers[q.clientId]?.textValue ?? ''}
+                        onChange={(value) => updateAnswer(q.clientId, { textValue: value })}
                       />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
-                    </>
-                  )}
-                  {q.questionType === 'TEXT' && (
-                    <TextInput
-                      value={answers[q.id]?.textValue ?? ''}
-                      onChange={(value) => updateAnswer(q.id, { textValue: value })}
-                    />
-                  )}
-                  {(q.questionType === 'SINGLE_CHOICE' || q.questionType === 'MULTI_CHOICE') && (
-                    <>
-                      <ChoiceInput
-                        options={q.options}
-                        multi={q.questionType === 'MULTI_CHOICE'}
-                        selected={answers[q.id]?.selectedOptionIds ?? []}
-                        onChange={(selectedOptionIds) => updateAnswer(q.id, { selectedOptionIds })}
-                      />
-                      <CommentField
-                        value={answers[q.id]?.commentText ?? ''}
-                        onChange={(commentText) => updateAnswer(q.id, { commentText })}
-                      />
-                    </>
-                  )}
-                </div>
-              ))}
+                    )}
+                    {q.questionType === 'MULTI_CHOICE' && (
+                      <>
+                        <ChoiceInput
+                          options={previewOptions}
+                          maxChoices={q.maxChoices ?? 1}
+                          selected={answers[q.clientId]?.selectedOptionIds ?? []}
+                          onChange={(selectedOptionIds) => updateAnswer(q.clientId, { selectedOptionIds })}
+                        />
+                        <CommentField
+                          value={answers[q.clientId]?.commentText ?? ''}
+                          onChange={(commentText) => updateAnswer(q.clientId, { commentText })}
+                        />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ))}
 
